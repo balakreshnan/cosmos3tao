@@ -1,0 +1,42 @@
+# TAO cosmos-rl evaluate spec: scores a checkpoint (or zero-shot base model) on the val split.
+# tao cosmos-rl create-job --kind experiment --action evaluate --parent-job-id <train_job> --specs @specs/evaluate.yaml ...
+num_gpus: 1
+
+evaluate:
+  dataset:
+    annotation_path: "path/to/eval_annotations.json"   # replaced by FTMS with the eval dataset mount
+    media_dir: "path/to/eval_media/"
+    system_prompt: "You are a quality inspector on a liquid filling line. Compare each numbered tube with the manufacturing plan strip at the top of the image."
+  model:
+    model_name: "nvidia/Cosmos3-Nano"
+    save_folder: "cosmos3_nano_tube_eval"
+    tokenizer_model_name: "qwen2.5-vl-7b"
+    dtype: "bfloat16"
+    tp_size: 1
+    max_length: 8192
+    enable_lora: true            # false => zero-shot baseline of the base model
+    base_model_path: ""
+  evaluation:
+    answer_type: "freeform"      # normalized_answer is compared as exact match after normalization
+    num_processes: 16
+    skip_saved: false
+    seed: 1
+    limit: -1
+    total_shard: 1
+    shard_id: 0
+  vision:
+    fps: 1
+    total_pixels: 313600
+  generation:
+    max_retries: 5
+    max_tokens: 1024
+    temperature: 0
+    repetition_penalty: 1
+    presence_penalty: 0
+    frequency_penalty: 0
+  results:
+    save_individual_results: true
+    save_confusion_matrix: true
+    save_metrics_summary: true
+
+results_dir: "/results"

@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# One-time setup on the Pre-Tyche (ptyche) SLURM login node.
+#   1. creates a Python venv on Lustre (dataset generation + HF download helpers only; NO training here)
+#   2. generates the synthetic tube-inspection dataset on Lustre
+#   3. downloads nvidia/Cosmos3-Nano to Lustre so compute nodes never need internet
+#   4. pre-imports the TAO cosmos-rl container to a .sqsh so the GPU job starts instantly
+#
+# Usage (on login-ptyche):
+#   export ACCOUNT=general_sa                # your SLURM account
+#   export HF_TOKEN=hf_xxx                   # optional, only if the model repo is gated for you
+#   bash cluster/ptyche_setup.sh
+set -euo pipefail
+
+ACCOUNT="${ACCOUNT:-general_sa}"
+LUSTRE_DIR="${LUSTRE_DIR:-/lustre/fsw/$ACCOUNT/$USER}"
+WORK="${WORK:-$LUSTRE_DIR/cosmos3tao}"
+IMAGE="${TAO_IMAGE:-nvcr.io/nvidia/tao/tao-toolkit:7.0.1-cosmos-rl}"
+MODEL_ID="${MODEL_ID:-nvidia/Cosmos3-Nano}"
+N_TRAIN="${N_TRAIN:-800}"
+N_VAL="${N_VAL:-200}"
+
+REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+mkdir -p "$WORK"/{data,models,results,sqsh,logs}
+echo ">> work dir: $WORK"
+
+# ---------------------------------------------------------------- 1. venv on Lustre
+if [ ! -x "$WORK/venv/bin/python" ]; then
+  echo ">> creating venv ($(python3 --version))"
+  python3 -m venv "$WORK/venv"
+fi
+# shellcheck disable=SC1091
+source "$WORK/venv/bin/activate"
+pip install -q --upgrade pip
+pip install -q pillow numpy pyyaml "huggingface_hub[cli]" tqdm
+
+# ---------------------------------------------------------------- 2. dataset
+if [ ! -f "$WORK/data/tube_inspection/train/annotations.json" ]; then
+  echo ">> generating dataset ($N_TRAIN train / $N_VAL val images)"
+  python "$REPO_DIR/dataset/generate_tube_dataset.py" --out "$WORK/data/tube_inspection" --train "$N_TRAIN" --val "$N_VAL"
+else
+  echo ">> dataset already present, skipping"
+fi
+
+# ---------------------------------------------------------------- 3. model
+MODEL_DIR="$WORK/models/$(basename "$MODEL_ID")"
+if [ ! -f "$MODEL_DIR/config.json" ]; then
+  echo ">> downloading $MODEL_ID to $MODEL_DIR (~33 GB, weights only)"
+  hf download "$MODEL_ID" --local-dir "$MODEL_DIR" --exclude 'assets/*' --exclude 'images/*'
+else
+  echo ">> model already present, skipping"
+fi
+
+# ---------------------------------------------------------------- 4. container -> sqsh
+SQSH="$WORK/sqsh/$(echo "$IMAGE" | tr '/:' '__').sqsh"
+if [ ! -f "$SQSH" ]; then
+  echo ">> importing $IMAGE -> $SQSH (uses ~/.config/enroot/.credentials for nvcr.io)"
+  srun -A "$ACCOUNT" -p batch -N1 -n1 --cpus-per-task=4 --time=01:00:00 --job-name=enroot-import \
+    enroot import -o "$SQSH" "docker://${IMAGE/\//#}"
+else
+  echo ">> sqsh already present, skipping"
+fi
+
+cat <<EOF
+
+Setup complete.
+  dataset : $WORK/data/tube_inspection/{train,val}
+  model   : $MODEL_DIR
+  sqsh    : $SQSH
+
+Submit the 4-GPU LoRA fine-tune with:
+  ACCOUNT=$ACCOUNT sbatch cluster/ptyche_train.sbatch
+EOF

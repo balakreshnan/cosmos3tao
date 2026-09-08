@@ -1,0 +1,89 @@
+# TAO cosmos-rl LoRA SFT spec for nvidia/Cosmos3-Nano on the tube-inspection dataset.
+# Submit with:  tao cosmos-rl create-job --kind experiment --action train --specs @specs/cosmos3_nano_lora_sft.yaml ...
+# Reference: https://docs.nvidia.com/tao/tao-toolkit/latest/text/vlm_finetuning/cosmos_rl.html
+
+train:
+  resume: false
+  epoch: 5
+  compile: false
+  train_batch_per_replica: 1
+  output_dir: "output"
+  optm_lr: 2e-5            # LoRA tolerates a higher LR than full SFT (doc default 1e-6 is for full SFT)
+  optm_impl: "foreach"
+  optm_weight_decay: 0.01
+  optm_min_lr_factor: 0.1
+  optm_grad_norm_clip: 1.0
+  epsilon: 1e-8
+  optm_name: "AdamW"
+  optm_betas: [0.9, 0.999]
+  optm_warmup_epochs: 0.2
+  async_tp_enabled: false
+  master_dtype: "float32"
+  param_dtype: "bfloat16"
+  fsdp_reduce_dtype: "float32"
+  fsdp_offload: false
+  fsdp_reshard_after_forward: "default"
+  sync_weight_interval: 1
+  ckpt:
+    enable_checkpoint: true
+    save_freq_in_epoch: 1
+    save_mode: "sync"
+    max_keep: 3
+    export_safetensors: true
+  train_policy:
+    type: "sft"
+    mini_batch: 4
+    enable_dataset_cache: true
+    dataloader_num_workers: 8
+    dataloader_prefetch_factor: 8
+    conversation_column_name: "conversations"
+    dataset:
+      name: "tube_inspection"
+      test_size: 0.05
+  fp8:
+    enable_fp8: false
+    fp8_recipe: "dynamic_scaling"
+    quant_recipe: "rowwise"
+
+validation:
+  enable: true
+  freq_in_epoch: 1
+
+policy:
+  model_name_or_path: "nvidia/Cosmos3-Nano"
+  model_max_length: 8192          # single image + short JSON answers; keeps memory low
+  model_gradient_checkpointing: true
+  parallelism:
+    n_init_replicas: 1
+    tp_size: 1
+    cp_size: 1
+    dp_shard_size: 4              # = GPUs in the SLURM allocation (cluster/render_spec.py overrides from --gpus)
+    dp_replicate_size: 1
+    pp_size: 1
+    cp_rotate_method: "allgather"
+  lora:
+    r: 16
+    lora_alpha: 32
+    lora_dropout: 0.05
+    target_modules: ["q_proj", "k_proj", "v_proj", "o_proj"]
+    use_rslora: false
+    modules_to_save: []
+    init_lora_weights: true
+
+logging:
+  logger: ["console", "tao"]
+  project_name: "cosmos3-tube-inspection"
+  experiment_name: "cosmos3_nano_lora_sft"
+
+custom:
+  dataset:
+    # FTMS mounts the dataset folder (images.tar.gz extracted + annotations.json) here.
+    annotation_path: "data/sft/annotations.json"
+    media_path: "data/sft"
+    system_prompt: ""
+  vision:
+    fps: 1
+    total_pixels: 313600          # ~560x560; tubes and swatches are large, this is plenty
+
+redis: "12800"
+results_dir: "/results"

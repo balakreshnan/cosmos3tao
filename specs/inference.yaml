@@ -1,0 +1,13 @@
+# TAO cosmos-rl inference spec: run the fine-tuned model on a single inspection image.
+inference:
+  media: "path/to/tubes_val_00000.png"
+  prompt: >-
+    You are a quality inspector on a liquid filling line. The strip at the top of the image is the
+    manufacturing plan: for each tube position it shows the planned color. Below it, a rack of numbered
+    tubes shows the actual fill result. Produce the inspection report as compact JSON with keys: tubes
+    (list of {position, planned_color, actual_color, fill_pct, status}), deviating_positions, pass.
+    status is one of OK, wrong_color, underfill, overfill, empty, contaminated. Output JSON only.
+  fps: 1
+  total_pixels: 313600
+  max_new_tokens: 1024
+  num_gpus: 1

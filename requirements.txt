@@ -1,0 +1,16 @@
+# Python 3.14 venv: local tooling only (dataset generation, job submission, inference client).
+# Training itself runs on the remote cluster via TAO FTMS, never in this venv.
+pillow>=12.0
+numpy>=2.0
+pyyaml>=6.0
+openai>=1.0
+python-dotenv>=1.0
+requests>=2.31
+tqdm>=4.66
+click>=8.0
+configparser
+
+# TAO remote client. Installed with --no-deps because nvidia-tao-core drags in uWSGI,
+# which does not build on Windows. See setup.ps1 / README for the exact install steps.
+# nvidia-tao-client==6.26.3
+# nvidia-tao-core==6.26.3
