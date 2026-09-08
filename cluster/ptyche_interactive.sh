@@ -15,11 +15,11 @@ REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 GPUS="${GPUS:-4}"
 [ -f "$SQSH" ] && CONTAINER="$SQSH" || CONTAINER="${IMAGE/\//#}"
 
-echo "container=$CONTAINER  mounts=$WORK:/tao-workspace,$REPO_DIR:/tao-repo"
+echo "container=$CONTAINER  mounts=$WORK:/tao-workspace,$REPO_DIR:/tao-repo  (GPUS=$GPUS, exported)"
+export GPUS
 exec srun --account="$ACCOUNT" \
      --partition="${PARTITION:-36x2-a01r}" \
      --nodes=1 --ntasks-per-node=1 \
-     --gres=gpu:"$GPUS" \
      --time=5:00:00 \
      --job-name=general_sa-finetune:tao \
      --container-image="$CONTAINER" \

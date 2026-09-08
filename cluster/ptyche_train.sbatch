@@ -11,9 +11,8 @@
 #SBATCH --partition=36x2-a01r
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --gres=gpu:4
-#SBATCH --cpus-per-task=32
 #SBATCH --time=5:00:00
+# NOTE: Pre-Tyche has no "gpu" GRES; nodes come whole. GPUS below limits the job to N devices.
 #SBATCH --job-name=general_sa-finetune:tao
 #SBATCH --no-requeue
 #SBATCH --output=/lustre/fsw/general_sa/%u/cosmos3tao/logs/%x-%j.out

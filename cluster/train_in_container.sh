@@ -10,7 +10,11 @@ set -euo pipefail
 
 C_WORK=/tao-workspace
 REPO=/tao-repo
-GPUS="${GPUS:-$(nvidia-smi -L | wc -l)}"
+VISIBLE=$(nvidia-smi -L | wc -l)
+GPUS="${GPUS:-$VISIBLE}"
+if [ "$GPUS" -gt "$VISIBLE" ]; then echo "WARN: requested $GPUS GPUs, node has $VISIBLE; using $VISIBLE"; GPUS=$VISIBLE; fi
+# Nodes are allocated whole on Pre-Tyche; restrict to the first $GPUS devices.
+export CUDA_VISIBLE_DEVICES="$(seq -s, 0 $((GPUS - 1)))"
 EPOCHS="${EPOCHS:-5}"
 RUN="${RUN:-cosmos3_nano_tube_lora_${SLURM_JOB_ID:-manual}_$(date +%Y%m%d_%H%M%S)}"
 RESULTS="$C_WORK/results/$RUN"
