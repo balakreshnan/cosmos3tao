@@ -52,6 +52,12 @@ sec "how a hook consumes the yaml spec (first hook, head)"
 H=$(ls "$SP"/tools/custom_hooks/tao*sft*.py 2>/dev/null | head -1)
 [ -n "$H" ] && { echo "$H"; sed -n '1,120p' "$H"; } || echo "(no tao sft hook found)"
 
+sec "/opt/cosmos_rl TAO hooks (what FTMS launches: cosmos-rl --config spec.toml /opt/cosmos_rl/tao_sft_example.py)"
+ls -la /opt/cosmos_rl 2>&1
+for f in /opt/cosmos_rl/tao_sft_example.py /opt/cosmos_rl/custom_sft.py; do
+  [ -f "$f" ] && { echo "--- $f (custom.* keys it reads):"; grep -n -E "custom|annotation_path|media_path|system_prompt|total_pixels|fps|dataset" "$f" | head -60; }
+done
+
 sec "omni -> qwen3_vl converter present?"
 python -c "import cosmos_rl.model_preparation.vlm_safetensors as m; print('converter:', m.__file__)" 2>&1 | tail -1
 ls /opt/tao 2>/dev/null; cat /opt/tao/image-provenance.json 2>/dev/null | head -20

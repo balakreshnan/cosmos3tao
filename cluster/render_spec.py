@@ -12,6 +12,34 @@ import argparse
 import yaml
 
 
+def _toml_scalar(v) -> str:
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    if isinstance(v, (int, float)):
+        return repr(v)
+    if isinstance(v, list):
+        return "[" + ", ".join(_toml_scalar(x) for x in v) + "]"
+    if v is None:
+        return '""'
+    s = str(v).replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{s}"'
+
+
+def to_toml(d: dict, prefix: str = "") -> str:
+    """Minimal dict -> TOML (matches what `toml.dumps` produces for TAO specs). No external deps."""
+    out, tables = [], []
+    for k, v in d.items():
+        if isinstance(v, dict):
+            tables.append((k, v))
+        else:
+            out.append(f"{k} = {_toml_scalar(v)}")
+    text = "\n".join(out) + ("\n" if out else "")
+    for k, v in tables:
+        name = f"{prefix}.{k}" if prefix else k
+        text += f"\n[{name}]\n" + to_toml(v, name)
+    return text
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--template", required=True)
@@ -49,6 +77,12 @@ def main():
     with open(a.out, "w") as fh:
         yaml.safe_dump(spec, fh, sort_keys=False)
     print(f"rendered spec -> {a.out}")
+
+    # TAO FTMS runs `toml.dumps(spec)` and launches `cosmos-rl --config spec.toml <hook>`; emit the same.
+    toml_path = a.out.rsplit(".", 1)[0] + ".toml"
+    with open(toml_path, "w") as fh:
+        fh.write(to_toml(spec))
+    print(f"rendered toml -> {toml_path}")
     print(yaml.safe_dump({"policy": spec["policy"], "custom": custom, "results_dir": a.results}, sort_keys=False))
 
 

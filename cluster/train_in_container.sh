@@ -50,8 +50,20 @@ export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}" TRANSFORMERS_OFFLINE="${TRANSFORMER
 export WANDB_MODE="${WANDB_MODE:-disabled}"
 export NUM_GPU_PER_NODE="$GPUS" WORLD_SIZE=1 NODE_RANK=0 MASTER_ADDR="${MASTER_ADDR:-127.0.0.1}" MASTER_PORT="${MASTER_PORT:-29500}"
 
-# ---- train. TAO container convention: "<network> <task> -e <spec> -r <results_dir>".
-TRAIN_CMD="${TAO_TRAIN_CMD:-cosmos_rl train -e $RESULTS/train_spec.yaml -r $RESULTS}"
+# ---- train. Mirrors TAO FTMS (nvidia_tao_core vlm_entrypoint.py): the yaml spec is dumped to TOML and
+# launched as `cosmos-rl --config spec.toml <dataset hook>`; the hook ships in the image under /opt/cosmos_rl.
+[ -f /opt/venv/cosmos_rl/bin/activate ] && source /opt/venv/cosmos_rl/bin/activate
+HOOK="${TAO_SFT_HOOK:-}"
+for cand in /opt/cosmos_rl/tao_sft_example.py /opt/cosmos_rl/custom_sft.py; do
+  [ -z "$HOOK" ] && [ -f "$cand" ] && HOOK="$cand"
+done
+if [ -z "$HOOK" ]; then
+  echo "FATAL: no TAO SFT dataset hook found under /opt/cosmos_rl:"; ls -la /opt/cosmos_rl 2>&1
+  echo "Set TAO_SFT_HOOK=<path> or TAO_TRAIN_CMD to override."; exit 3
+fi
+echo "-- dataset hook: $HOOK"
+cp "$RESULTS/train_spec.toml" "$RESULTS/spec.toml"
+TRAIN_CMD="${TAO_TRAIN_CMD:-cosmos-rl --config $RESULTS/spec.toml $HOOK}"
 echo "== launching: $TRAIN_CMD"
 cd "$C_WORK"
 set +e
