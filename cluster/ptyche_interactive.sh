@@ -23,7 +23,7 @@ exec srun --account="$ACCOUNT" \
      --partition="${PARTITION:-36x2-a01r}" \
      --nodes=1 --ntasks-per-node=1 \
      --time=5:00:00 \
-     --job-name=general_sa-finetune:tao \
+     --job-name="$ACCOUNT-cosmos3.interactive" \
      --container-image="$CONTAINER" \
      --container-mounts="$WORK:/tao-workspace,$REPO_DIR:/tao-repo" \
      --container-mount-home \

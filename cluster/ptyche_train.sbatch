@@ -4,7 +4,7 @@
 #   cd $LUSTRE_DIR/cosmos3tao/repo          # your git checkout
 #   sbatch cluster/ptyche_train.sbatch
 #   squeue -u $USER
-#   tail -f $LUSTRE_DIR/cosmos3tao/logs/general_sa-finetune:tao-<jobid>.out
+#   tail -f $LUSTRE_DIR/cosmos3tao/logs/general_sa-cosmos3.tao-finetune-<jobid>.out
 #
 # Run cluster/ptyche_setup.sh once first (dataset, model, sqsh on Lustre).
 #SBATCH --account=general_sa
@@ -13,7 +13,7 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --time=5:00:00
 # NOTE: Pre-Tyche has no "gpu" GRES; nodes come whole. GPUS below limits the job to N devices.
-#SBATCH --job-name=general_sa-finetune:tao
+#SBATCH --job-name=general_sa-cosmos3.tao-finetune
 #SBATCH --no-requeue
 #SBATCH --output=/lustre/fsw/general_sa/%u/cosmos3tao/logs/%x-%j.out
 #SBATCH --error=/lustre/fsw/general_sa/%u/cosmos3tao/logs/%x-%j.err

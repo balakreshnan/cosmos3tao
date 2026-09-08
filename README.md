@@ -62,7 +62,7 @@ squeue -u $USER
 ```
 
 ```bash
-tail -f $LUSTRE_DIR/cosmos3tao/logs/general_sa-finetune:tao-*.out
+tail -f $LUSTRE_DIR/cosmos3tao/logs/general_sa-cosmos3.tao-finetune-*.out
 ```
 
 Or do the same interactively (drops you into the TAO container with 4 GPUs, then run the trainer):

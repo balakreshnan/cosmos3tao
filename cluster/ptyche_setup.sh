@@ -49,7 +49,7 @@ if [ ! -f "$MODEL_DIR/config.json" ]; then
   # The download is resumable; re-run this script if it is interrupted.
   export HF_HUB_DISABLE_XET=1 HF_HUB_ENABLE_HF_TRANSFER=0 HF_HOME="$WORK/hf_cache"
   srun -A "$ACCOUNT" -p "${PARTITION:-batch}" -N1 -n1 --cpus-per-task=16 --mem=64G --time=02:00:00 \
-    --job-name=hf-download --export=ALL \
+    --job-name="$ACCOUNT-cosmos3.hf-download" --export=ALL \
     "$WORK/venv/bin/hf" download "$MODEL_ID" --local-dir "$MODEL_DIR" \
       --exclude 'assets/*' --exclude 'images/*' --max-workers 8
 else
@@ -63,7 +63,7 @@ ARCH="${ARCH:-$(uname -m)}"
 SQSH="$WORK/sqsh/$(echo "$IMAGE" | tr '/:' '__')-$ARCH.sqsh"
 if [ ! -f "$SQSH" ]; then
   echo ">> importing $IMAGE -> $SQSH (uses ~/.config/enroot/.credentials for nvcr.io)"
-  srun -A "$ACCOUNT" -p "${PARTITION:-batch}" -N1 -n1 --cpus-per-task=4 --time=01:00:00 --job-name=enroot-import \
+  srun -A "$ACCOUNT" -p "${PARTITION:-batch}" -N1 -n1 --cpus-per-task=4 --time=01:00:00 --job-name="$ACCOUNT-cosmos3.enroot-import" \
     enroot import -o "$SQSH" "docker://${IMAGE/\//#}"
 else
   echo ">> sqsh already present, skipping"
