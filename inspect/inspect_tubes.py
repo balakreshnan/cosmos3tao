@@ -31,15 +31,22 @@ from pathlib import Path
 from dotenv import load_dotenv
 from openai import OpenAI
 
-PROMPT = (
-    "You are a quality inspector on a liquid filling line. The strip at the top of the image is the "
-    "manufacturing plan: for each tube position it shows the planned color. Below it, a rack of numbered "
-    "tubes shows the actual fill result.\n"
-    "Produce the inspection report as compact JSON with keys: tubes (list of {position, planned_color, "
-    "actual_color, fill_pct, status}), deviating_positions, pass. status is one of OK, wrong_color, "
-    "underfill, overfill, empty, contaminated. Color words: red, orange, yellow, green, cyan, blue, purple, "
-    "magenta, brown, white, or none for an empty tube. Output JSON only."
+CONTEXT = (
+    "You are a quality inspector watching a vial filling line from the side. Each wheeled carrier on the "
+    "track holds one clear vial with a printed label. Vials are numbered by position from left to right. "
+    "A correctly filled liquid vial is filled to roughly one third of its height."
 )
+QUESTION = (
+    "Produce the inspection report as compact JSON with keys: vials (list of {position, vial_id, planned, "
+    "actual, fill_pct, status}), deviating_positions, pass. actual is one of orange, blue, yellow, red, green, "
+    "purple, clear, cubes, empty. status is one of OK, wrong_color, underfill, overfill, empty, wrong_content. "
+    "Output JSON only."
+)
+
+
+def build_prompt(plan_text: str | None) -> str:
+    plan = f"Manufacturing plan: {plan_text}\n" if plan_text else ""
+    return f"{CONTEXT}\n{plan}{QUESTION}"
 
 
 def image_data_url(path: Path) -> str:
@@ -58,14 +65,14 @@ def extract_json(text: str) -> dict | None:
         return None
 
 
-def inspect(client: OpenAI, model: str, image: Path, max_tokens: int) -> tuple[dict | None, str]:
+def inspect(client: OpenAI, model: str, image: Path, max_tokens: int, plan_text: str | None = None) -> tuple[dict | None, str]:
     resp = client.chat.completions.create(
         model=model,
         messages=[{
             "role": "user",
             "content": [
                 {"type": "image_url", "image_url": {"url": image_data_url(image)}},
-                {"type": "text", "text": PROMPT},
+                {"type": "text", "text": build_prompt(plan_text)},
             ],
         }],
         max_tokens=max_tokens,
@@ -76,15 +83,15 @@ def inspect(client: OpenAI, model: str, image: Path, max_tokens: int) -> tuple[d
 
 
 def score(pred: dict | None, gt: dict) -> dict:
-    """Per-image metrics: color accuracy per tube, status accuracy, deviation-set exact match, pass/fail match."""
-    n = len(gt["tubes"])
+    """Per-image metrics: content accuracy per vial, status accuracy, deviation-set exact match, pass/fail match."""
+    n = len(gt["vials"])
     out = {"tubes": n, "color_ok": 0, "status_ok": 0, "dev_exact": 0, "pass_ok": 0, "parsed": pred is not None}
     if not pred:
         return out
-    pt = {t.get("position"): t for t in pred.get("tubes", []) if isinstance(t, dict)}
-    for t in gt["tubes"]:
+    pt = {t.get("position"): t for t in pred.get("vials", []) if isinstance(t, dict)}
+    for t in gt["vials"]:
         p = pt.get(t["position"], {})
-        out["color_ok"] += int(str(p.get("actual_color", "")).lower() == t["actual_color"])
+        out["color_ok"] += int(str(p.get("actual", "")).lower() == t["actual"])
         out["status_ok"] += int(str(p.get("status", "")) == t["status"])
     pred_dev = sorted(int(x) for x in pred.get("deviating_positions", []) if str(x).isdigit())
     out["dev_exact"] = int(pred_dev == sorted(gt["deviating_positions"]))
@@ -95,7 +102,9 @@ def score(pred: dict | None, gt: dict) -> dict:
 def main():
     load_dotenv()
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--image", help="single image to inspect")
+    ap.add_argument("--image", help="single image to inspect (e.g. a real plant photo)")
+    ap.add_argument("--plan", help="manufacturing plan text for --image, e.g. "
+                    "'position 1 (VIAL 0019): orange liquid; position 2 (VIAL 0020): blue liquid'")
     ap.add_argument("--split", help="dataset split folder containing images/ and ground_truth.json")
     ap.add_argument("--limit", type=int, default=20)
     ap.add_argument("--base-url", default=os.getenv("NVIDIA_CHAT_BASE_URL", "https://inference-api.nvidia.com/v1"))
@@ -109,7 +118,7 @@ def main():
     print(f"endpoint={args.base_url} model={args.model}", file=sys.stderr)
 
     if args.image:
-        pred, raw = inspect(client, args.model, Path(args.image), args.max_tokens)
+        pred, raw = inspect(client, args.model, Path(args.image), args.max_tokens, args.plan)
         print(json.dumps(pred, indent=2) if pred else raw)
         return
 
@@ -122,7 +131,7 @@ def main():
     totals = {"images": 0, "tubes": 0, "color_ok": 0, "status_ok": 0, "dev_exact": 0, "pass_ok": 0, "parsed": 0}
     with open(args.out, "w") as fh:
         for rel, gt in list(gts.items())[: args.limit]:
-            pred, raw = inspect(client, args.model, split / rel, args.max_tokens)
+            pred, raw = inspect(client, args.model, split / rel, args.max_tokens, gt.get("plan_text"))
             s = score(pred, gt)
             totals["images"] += 1
             for k in ("tubes", "color_ok", "status_ok", "dev_exact", "pass_ok", "parsed"):

@@ -6,10 +6,17 @@ cosmos-rl container (Pyxis/Enroot). Nothing trains on the laptop.
 
 ## The inspection task
 
-A filling station fills a rack of numbered tubes with colored liquid. The HMI strip at the top of every
-image is the **manufacturing plan** (planned color per tube position). The model reads the plan, looks at
-each tube, and reports actual color, fill level, per-tube status (`OK`, `wrong_color`, `underfill`,
-`overfill`, `empty`, `contaminated`), the deviating positions, and pass/fail.
+Side-view camera on a MagneMotion-style linear track. Each wheeled carrier holds one labeled clear vial
+that contains colored liquid (about one third full), nothing, or a stack of colored cubes. The
+**manufacturing plan** (expected content per position / vial ID) is passed as text in the prompt, since it is
+not visible in the plant image. The model reports actual content, fill level, per-vial status (`OK`,
+`wrong_color`, `underfill`, `overfill`, `empty`, `wrong_content`), the deviating positions, and pass/fail.
+
+Test on a real plant photo:
+
+```powershell
+python inspect\inspect_tubes.py --image plant.jpg --plan "position 1 (VIAL 0019): orange liquid; position 2 (VIAL 0020): blue liquid; position 3 (VIAL 0021): yellow liquid"
+```
 
 ## Layout
 

@@ -1,25 +1,22 @@
 """
-Synthetic "tube filling line" inspection dataset for Cosmos3-Nano fine-tuning with TAO.
+Synthetic side-view dataset of a vial filling line (MagneMotion-style linear track) for Cosmos3-Nano
+fine-tuning with TAO.
 
-Scenario
---------
-A filling station fills a rack of test tubes with colored liquid. Each production run has a
-MANUFACTURING PLAN: the expected color for every tube position. The plan is printed as a
-color-swatch strip at the top of the image (as a real station would show on its HMI).
-The inspection task is to read the plan, look at every tube, and report:
-  * the color actually in each tube
-  * whether each tube matches the plan
-  * the list of tube positions that deviate (wrong color, under-fill, over-fill, empty, contaminated)
+Modeled on the real plant camera: a horizontal stainless track with individual wheeled carriers, each
+clamping one tall clear vial with a printed label ("20200232 VIAL 0019" + QR). Vials contain either
+colored liquid filling roughly the bottom third, nothing (empty), or a stack of colored plastic cubes.
+A glass safety shield with vertical frame bars sits between camera and track.
+
+The MANUFACTURING PLAN is not visible in the plant image, so it is supplied as text in the prompt
+("expected content per vial"), and the model must compare what it sees against that plan.
 
 Output layout (TAO cosmos-rl "vlm/llava" dataset)
 -------------------------------------------------
-out/
-  train/
-    images/*.png
-    annotations.json      # LLaVA conversations, TAO fields: id, images, conversations, category, normalized_answer
-    ground_truth.json     # per-image plan + actual state (for local scoring, not used by TAO)
-    images.tar.gz         # TAO expects images.tar.gz + annotations.json inside the dataset folder
-  val/ (same)
+out/<split>/
+  images/*.png
+  annotations.json      # id, images, conversations, category, normalized_answer
+  ground_truth.json     # per-image plan + actual state (used by inspect/inspect_tubes.py)
+  images.tar.gz
 
 Usage
 -----
@@ -33,49 +30,46 @@ import hashlib
 import json
 import random
 import tarfile
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
-# --------------------------------------------------------------------------- palette
-# Name -> RGB. Names are the vocabulary the model must answer with.
-PALETTE: dict[str, tuple[int, int, int]] = {
-    "red": (214, 40, 40),
-    "orange": (244, 140, 6),
-    "yellow": (245, 208, 30),
-    "green": (46, 160, 67),
-    "cyan": (30, 190, 215),
-    "blue": (34, 90, 220),
-    "purple": (130, 50, 190),
-    "magenta": (215, 55, 170),
-    "brown": (120, 72, 30),
-    "white": (240, 240, 240),
+# --------------------------------------------------------------------------- vocab
+LIQUIDS: dict[str, tuple[int, int, int]] = {
+    "orange": (232, 96, 10),
+    "blue": (20, 110, 225),
+    "yellow": (238, 200, 20),
+    "red": (205, 30, 30),
+    "green": (40, 165, 80),
+    "purple": (120, 50, 180),
+    "clear": (215, 225, 235),
 }
-COLOR_NAMES = list(PALETTE)
+CUBE_COLORS = {"red": (215, 45, 40), "blue": (35, 90, 210), "yellow": (240, 200, 40)}
 
+# content words the model answers with
+CONTENTS = list(LIQUIDS) + ["cubes", "empty"]
 STATUS_OK = "OK"
-DEFECTS = ["wrong_color", "underfill", "overfill", "empty", "contaminated"]
+DEFECTS = ["wrong_color", "underfill", "overfill", "empty", "wrong_content"]
+
+NORMAL_FILL = (28, 42)      # percent of vial height for a good liquid fill (real line ~1/3)
+LOT = "20200232"
 
 
 @dataclass
-class Tube:
-    position: int          # 1-based
-    planned_color: str
-    actual_color: str      # "none" when empty
-    fill_pct: int          # 0..100
-    status: str            # OK | wrong_color | underfill | overfill | empty | contaminated
-    contaminant_color: str | None = None
+class Vial:
+    position: int            # 1-based, left to right
+    vial_id: str             # e.g. "VIAL 0019"
+    planned: str             # planned content: a liquid color, "cubes" or "empty"
+    actual: str              # actual content word
+    fill_pct: int            # liquid height %, 0 for empty/cubes
+    status: str
 
 
 # --------------------------------------------------------------------------- helpers
-def jitter(rgb, amount=14, rng: random.Random | None = None):
+def jitter(rgb, amt=10, rng: random.Random | None = None):
     rng = rng or random
-    return tuple(max(0, min(255, c + rng.randint(-amount, amount))) for c in rgb)
-
-
-def darken(rgb, f=0.7):
-    return tuple(int(c * f) for c in rgb)
+    return tuple(max(0, min(255, c + rng.randint(-amt, amt))) for c in rgb)
 
 
 def load_font(size: int):
@@ -87,226 +81,246 @@ def load_font(size: int):
     return ImageFont.load_default()
 
 
-def sample_run(rng: random.Random, n_tubes: int, defect_rate: float) -> list[Tube]:
-    """Create a plan and the 'actual' filling result with random defects."""
-    tubes: list[Tube] = []
-    for pos in range(1, n_tubes + 1):
-        planned = rng.choice(COLOR_NAMES)
-        if rng.random() < defect_rate:
-            defect = rng.choice(DEFECTS)
-        else:
-            defect = STATUS_OK
+def sample_run(rng: random.Random, n: int, defect_rate: float) -> list[Vial]:
+    start = rng.randint(1, 180)
+    vials = []
+    for i in range(n):
+        pos = i + 1
+        vid = f"VIAL {start + i:04d}"
+        planned = rng.choices(["liquid", "cubes", "empty"], weights=[0.7, 0.15, 0.15])[0]
+        if planned == "liquid":
+            planned = rng.choice([c for c in LIQUIDS if c != "clear"] + ["clear"])
 
-        actual, fill, contaminant = planned, rng.randint(72, 90), None
-        if defect == "wrong_color":
-            actual = rng.choice([c for c in COLOR_NAMES if c != planned])
-        elif defect == "underfill":
-            fill = rng.randint(15, 50)
-        elif defect == "overfill":
-            fill = rng.randint(96, 100)
-        elif defect == "empty":
-            actual, fill = "none", 0
-        elif defect == "contaminated":
-            contaminant = rng.choice([c for c in COLOR_NAMES if c != planned])
-        tubes.append(Tube(pos, planned, actual, fill, defect, contaminant))
-    return tubes
+        status = rng.choice(DEFECTS) if rng.random() < defect_rate else STATUS_OK
+        actual, fill = planned, 0
+        if planned in LIQUIDS:
+            fill = rng.randint(*NORMAL_FILL)
+            if status == "wrong_color":
+                actual = rng.choice([c for c in LIQUIDS if c != planned])
+            elif status == "underfill":
+                fill = rng.randint(4, 16)
+            elif status == "overfill":
+                fill = rng.randint(58, 80)
+            elif status == "empty":
+                actual, fill = "empty", 0
+            elif status == "wrong_content":
+                actual, fill = "cubes", 0
+        elif planned == "cubes":
+            if status in ("wrong_color", "underfill", "overfill"):
+                status = STATUS_OK          # not meaningful for cubes
+            elif status == "empty":
+                actual = "empty"
+            elif status == "wrong_content":
+                actual = rng.choice([c for c in LIQUIDS if c != "clear"])
+                fill = rng.randint(*NORMAL_FILL)
+        else:  # planned empty (e.g. a placeholder / not yet filled)
+            if status in ("wrong_color", "underfill", "overfill", "empty"):
+                status = STATUS_OK
+            elif status == "wrong_content":
+                actual = rng.choice(["cubes"] + [c for c in LIQUIDS if c != "clear"])
+                fill = 0 if actual == "cubes" else rng.randint(*NORMAL_FILL)
+        vials.append(Vial(pos, vid, planned, actual, fill, status))
+    return vials
 
 
 # --------------------------------------------------------------------------- rendering
-def render(tubes: list[Tube], rng: random.Random, width=1024, height=640) -> Image.Image:
-    img = Image.new("RGB", (width, height), (58, 62, 68))
+def render(vials: list[Vial], rng: random.Random, W=1400, H=700) -> Image.Image:
+    img = Image.new("RGB", (W, H), (236, 236, 232))
     d = ImageDraw.Draw(img)
-    f_med, f_big = load_font(22), load_font(28)
-    f_small = load_font(18 if len(tubes) <= 8 else 14)   # keep "10: MAGENTA" inside its swatch
+    f_lab = load_font(11)
 
-    # Station background: wall panel + conveyor
-    d.rectangle([0, 0, width, height], fill=jitter((60, 64, 70), 6, rng))
-    conveyor_y = height - 110
-    d.rectangle([0, conveyor_y, width, height], fill=(38, 40, 44))
-    for x in range(0, width, 48):  # conveyor slats
-        d.rectangle([x, conveyor_y + 8, x + 40, conveyor_y + 14], fill=(70, 72, 76))
+    # ---- back wall + background clutter (cabinets / trays)
+    d.rectangle([0, 0, W, int(H * 0.42)], fill=jitter((228, 228, 224), 5, rng))
+    for _ in range(rng.randint(2, 4)):
+        x0 = rng.randint(0, W - 200); w = rng.randint(140, 320); y0 = rng.randint(40, 170)
+        d.rectangle([x0, y0, x0 + w, y0 + rng.randint(60, 120)], fill=jitter((205, 208, 210), 12, rng),
+                    outline=(170, 172, 175))
+    # yellow-capped tray in the back right (like the real photo)
+    tx = rng.randint(int(W * 0.55), int(W * 0.8))
+    d.rectangle([tx, 90, tx + 260, 140], fill=(40, 40, 44))
+    for cx in range(tx + 14, tx + 250, 24):
+        d.ellipse([cx, 100, cx + 16, 116], fill=(240, 205, 40))
 
-    # HMI plan strip at top
-    strip_h = 92
-    d.rectangle([16, 12, width - 16, 12 + strip_h], fill=(20, 22, 26), outline=(120, 124, 130), width=2)
-    run_id = rng.randint(10000, 99999)
-    d.text((28, 20), f"FILL PLAN  RUN-{run_id}   LINE {rng.randint(1, 6)}", fill=(230, 230, 230), font=f_med)
-    n = len(tubes)
-    slot_w = (width - 64) / n
-    for t in tubes:
-        x0 = 32 + (t.position - 1) * slot_w
-        d.rectangle([x0 + 6, 52, x0 + slot_w - 6, 96], fill=PALETTE[t.planned_color], outline=(200, 200, 200))
-        label = f"{t.position}: {t.planned_color.upper()}"
-        tc = (20, 20, 20) if t.planned_color in ("white", "yellow", "cyan") else (245, 245, 245)
-        d.text((x0 + 12, 64), label, fill=tc, font=f_small)
+    # ---- track body (horizontal bands): steel top rail, dark motor band, steel skirt
+    track_top = int(H * 0.42)
+    d.rectangle([0, track_top, W, track_top + 60], fill=(178, 182, 186))          # brushed top
+    d.rectangle([0, track_top + 60, W, track_top + 110], fill=(48, 50, 54))        # dark band
+    d.rectangle([0, track_top + 110, W, track_top + 190], fill=(150, 154, 158))    # rail housing
+    d.rectangle([0, track_top + 190, W, track_top + 205], fill=(90, 92, 96))       # rail edge
+    d.rectangle([0, track_top + 205, W, H], fill=(120, 124, 128))                  # skirt
+    for y in range(track_top, track_top + 60, 4):                                  # brushed texture
+        d.line([(0, y), (W, y)], fill=jitter((178, 182, 186), 6, rng), width=1)
+    # bolt heads on housing
+    for x in range(20, W, 46):
+        d.ellipse([x, track_top + 150, x + 8, track_top + 158], fill=(80, 82, 86))
+    d.text((int(W * 0.62), track_top + 74), "MM LITE", fill=(200, 200, 200), font=load_font(16))
 
-    # Rack
-    rack_top = 150
-    rack_h = conveyor_y - rack_top - 10
-    d.rounded_rectangle([40, rack_top, width - 40, rack_top + rack_h], radius=14, fill=(92, 96, 104), outline=(30, 30, 34), width=3)
+    # ---- carriers with vials
+    n = len(vials)
+    base_y = track_top + 150            # top of carrier block
+    pitch = (W - 120) / n
+    vial_h = rng.randint(230, 270)
+    vial_w = 48
+    for v in vials:
+        cx = int(60 + (v.position - 0.5) * pitch + rng.randint(-8, 8))
+        # carrier block + wheels
+        d.rectangle([cx - 46, base_y, cx + 46, base_y + 40], fill=(190, 194, 198), outline=(110, 112, 116))
+        d.rectangle([cx - 30, base_y - 6, cx + 30, base_y + 6], fill=(205, 208, 212))
+        for wx in (cx - 34, cx + 34):
+            d.ellipse([wx - 11, base_y + 30, wx + 11, base_y + 52], fill=(30, 30, 32))
+            d.ellipse([wx - 5, base_y + 36, wx + 5, base_y + 46], fill=(120, 122, 126))
+        # vertical aluminum bracket behind vial + black clamp ring
+        d.rectangle([cx - 52, base_y - vial_h + 40, cx - 42, base_y], fill=(200, 203, 207), outline=(140, 142, 146))
+        d.rectangle([cx + 42, base_y - vial_h + 40, cx + 52, base_y], fill=(200, 203, 207), outline=(140, 142, 146))
+        ring_y = base_y - vial_h + 60
+        d.rectangle([cx - 60, ring_y, cx + 60, ring_y + 22], fill=(28, 28, 30))
 
-    # Nozzles + tubes
-    tube_w = int(min(70, slot_w * 0.55))
-    tube_h = int(rack_h * 0.80)
-    tube_top = rack_top + int(rack_h * 0.12)
-    for t in tubes:
-        cx = int(40 + (t.position - 0.5) * (width - 80) / n)
-        x0, x1 = cx - tube_w // 2, cx + tube_w // 2
-        y0, y1 = tube_top, tube_top + tube_h
+        # vial body (clear): light translucent tube
+        x0, x1 = cx - vial_w // 2, cx + vial_w // 2
+        y0, y1 = base_y - vial_h, base_y + 8
+        d.rounded_rectangle([x0, y0, x1, y1], radius=vial_w // 2, fill=(206, 214, 222), outline=(150, 158, 166), width=2)
+        inner = [x0 + 3, y0 + 3, x1 - 3, y1 - 3]
+        ih = inner[3] - inner[1]
 
-        # nozzle
-        d.rectangle([cx - 8, rack_top - 26, cx + 8, rack_top + 4], fill=(150, 152, 158))
-        d.polygon([(cx - 8, rack_top + 4), (cx + 8, rack_top + 4), (cx, rack_top + 16)], fill=(120, 122, 126))
+        # contents
+        if v.actual in LIQUIDS and v.fill_pct > 0:
+            top = inner[3] - int(ih * v.fill_pct / 100)
+            col = jitter(LIQUIDS[v.actual], 8, rng)
+            d.rounded_rectangle([inner[0], top, inner[2], inner[3]], radius=vial_w // 2 - 3, fill=col)
+            d.ellipse([inner[0], top - 4, inner[2], top + 4], fill=tuple(int(c * 0.8) for c in col))
+            d.line([(inner[0] + 6, top + 8), (inner[0] + 6, inner[3] - 10)], fill=tuple(min(255, c + 60) for c in col), width=3)
+        elif v.actual == "cubes":
+            cube = vial_w - 12
+            y = inner[3] - cube - 2
+            names = list(CUBE_COLORS)
+            while y > inner[1] + ih * 0.15:
+                c = CUBE_COLORS[rng.choice(names)]
+                d.rectangle([cx - cube // 2, y, cx + cube // 2, y + cube - 2], fill=jitter(c, 8, rng),
+                            outline=tuple(int(k * 0.6) for k in c))
+                d.polygon([(cx - cube // 2, y), (cx + cube // 2, y), (cx + cube // 2 - 6, y - 5), (cx - cube // 2 + 6, y - 5)],
+                          fill=tuple(min(255, k + 40) for k in c))
+                y -= cube + 1
+        # glass highlights
+        d.line([(x0 + 7, y0 + 14), (x0 + 7, y1 - 20)], fill=(245, 248, 250), width=3)
+        d.line([(x1 - 8, y0 + 20), (x1 - 8, y1 - 30)], fill=(235, 238, 240), width=1)
 
-        # glass body (slightly translucent look)
-        d.rounded_rectangle([x0, y0, x1, y1], radius=tube_w // 2, fill=(180, 186, 194), outline=(235, 238, 242), width=2)
-        inner = [x0 + 4, y0 + 4, x1 - 4, y1 - 4]
+        # label with lot / vial id and QR square
+        ly = ring_y - 46
+        d.rectangle([x0 + 4, ly, x1 - 4, ly + 40], fill=(245, 245, 242), outline=(180, 180, 176))
+        d.text((x0 + 7, ly + 3), LOT, fill=(40, 40, 40), font=f_lab)
+        d.text((x0 + 7, ly + 16), v.vial_id, fill=(40, 40, 40), font=f_lab)
+        qx = x0 + 8
+        for i in range(4):
+            for j in range(2):
+                if rng.random() < 0.6:
+                    d.rectangle([qx + i * 3, ly + 30 + j * 3, qx + i * 3 + 2, ly + 30 + j * 3 + 2], fill=(30, 30, 30))
 
-        # liquid
-        if t.fill_pct > 0:
-            liq_top = inner[3] - int((inner[3] - inner[1]) * t.fill_pct / 100)
-            col = jitter(PALETTE[t.actual_color], 12, rng)
-            d.rounded_rectangle([inner[0], liq_top, inner[2], inner[3]], radius=tube_w // 2 - 4, fill=col)
-            # meniscus
-            d.ellipse([inner[0], liq_top - 5, inner[2], liq_top + 5], fill=darken(col, 0.85))
-            if t.status == "contaminated" and t.contaminant_color:
-                band_h = max(10, (inner[3] - liq_top) // 5)
-                by = rng.randint(liq_top + 6, max(liq_top + 6, inner[3] - band_h - 6))
-                d.rectangle([inner[0] + 2, by, inner[2] - 2, by + band_h], fill=jitter(PALETTE[t.contaminant_color], 8, rng))
-        # glare
-        d.line([(x0 + 8, y0 + 18), (x0 + 8, y1 - 24)], fill=(250, 250, 250), width=3)
-        # fill-level tick marks
-        for pct in (25, 50, 75, 100):
-            ty = inner[3] - int((inner[3] - inner[1]) * pct / 100)
-            d.line([(x1 + 3, ty), (x1 + 10, ty)], fill=(220, 220, 220), width=1)
+    # ---- safety shield: vertical frame bars + faint glass tint
+    shield = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    sd = ImageDraw.Draw(shield)
+    for _ in range(rng.randint(2, 3)):
+        bx = rng.randint(40, W - 40)
+        sd.rectangle([bx, 0, bx + rng.randint(8, 14), H], fill=(210, 214, 218, 235))
+    sd.rectangle([0, 0, W, H], fill=(255, 255, 255, 14))
+    img = Image.alpha_composite(img.convert("RGBA"), shield).convert("RGB")
 
-        # position label on conveyor
-        d.rounded_rectangle([cx - 20, conveyor_y + 30, cx + 20, conveyor_y + 62], radius=6, fill=(230, 230, 230))
-        d.text((cx - 7 if t.position < 10 else cx - 13, conveyor_y + 34), str(t.position), fill=(20, 20, 20), font=f_big)
-
-    # subtle noise for realism
+    # mild camera softness + noise
+    img = img.filter(ImageFilter.GaussianBlur(0.4))
     px = img.load()
-    for _ in range(width * height // 40):
-        x, y = rng.randrange(width), rng.randrange(height)
+    for _ in range(W * H // 60):
+        x, y = rng.randrange(W), rng.randrange(H)
         r, g, b = px[x, y]
-        v = rng.randint(-10, 10)
-        px[x, y] = (max(0, min(255, r + v)), max(0, min(255, g + v)), max(0, min(255, b + v)))
+        k = rng.randint(-8, 8)
+        px[x, y] = (max(0, min(255, r + k)), max(0, min(255, g + k)), max(0, min(255, b + k)))
     return img
 
 
 # --------------------------------------------------------------------------- annotations
-SYSTEM_CONTEXT = (
-    "You are a quality inspector on a liquid filling line. The strip at the top of the image is the "
-    "manufacturing plan: for each tube position it shows the planned color. Below it, a rack of numbered "
-    "tubes shows the actual fill result."
+def describe_plan(vials: list[Vial]) -> str:
+    parts = []
+    for v in vials:
+        what = "empty" if v.planned == "empty" else ("colored cubes" if v.planned == "cubes" else f"{v.planned} liquid")
+        parts.append(f"position {v.position} ({v.vial_id}): {what}")
+    return "; ".join(parts)
+
+
+CONTEXT = (
+    "You are a quality inspector watching a vial filling line from the side. Each wheeled carrier on the "
+    "track holds one clear vial with a printed label. Vials are numbered by position from left to right. "
+    "A correctly filled liquid vial is filled to roughly one third of its height."
 )
 
 
-def deviations(tubes: list[Tube]) -> list[int]:
-    return [t.position for t in tubes if t.status != STATUS_OK]
+def deviations(vials):
+    return [v.position for v in vials if v.status != STATUS_OK]
 
 
-def report_json(tubes: list[Tube]) -> dict:
+def report_json(vials: list[Vial]) -> dict:
     return {
-        "tubes": [
-            {
-                "position": t.position,
-                "planned_color": t.planned_color,
-                "actual_color": t.actual_color,
-                "fill_pct": t.fill_pct,
-                "status": t.status,
-            }
-            for t in tubes
+        "vials": [
+            {"position": v.position, "vial_id": v.vial_id, "planned": v.planned, "actual": v.actual,
+             "fill_pct": v.fill_pct, "status": v.status}
+            for v in vials
         ],
-        "deviating_positions": deviations(tubes),
-        "pass": len(deviations(tubes)) == 0,
+        "deviating_positions": deviations(vials),
+        "pass": not deviations(vials),
     }
 
 
-def make_samples(image_rel: str, tubes: list[Tube], rng: random.Random) -> list[dict]:
-    """Return several LLaVA-format QA samples for one image (TAO cosmos-rl schema)."""
+def make_samples(image_rel: str, vials: list[Vial], rng: random.Random) -> list[dict]:
+    plan = describe_plan(vials)
     samples = []
 
-    def add(question: str, answer: str, category: str):
-        sid = hashlib.md5(f"{image_rel}|{question}".encode()).hexdigest()
-        samples.append(
-            {
-                "id": sid,
-                "images": [image_rel],
-                "conversations": [
-                    {"from": "human", "value": f"<image>\n{SYSTEM_CONTEXT}\n{question}"},
-                    {"from": "gpt", "value": answer},
-                ],
-                "category": category,
-                "normalized_answer": answer,
-            }
-        )
+    def add(q, a, cat, with_plan=True):
+        prompt = f"<image>\n{CONTEXT}\n" + (f"Manufacturing plan: {plan}\n" if with_plan else "") + q
+        samples.append({
+            "id": hashlib.md5(f"{image_rel}|{q}".encode()).hexdigest(),
+            "images": [image_rel],
+            "conversations": [{"from": "human", "value": prompt}, {"from": "gpt", "value": a}],
+            "category": cat,
+            "normalized_answer": a,
+        })
 
-    # 1) color of a random tube
-    t = rng.choice(tubes)
-    add(
-        f"What color is the liquid in tube {t.position}? Answer with a single color word, or 'none' if the tube is empty.",
-        t.actual_color,
-        "color",
-    )
+    v = rng.choice(vials)
+    add(f"What is in the vial at position {v.position}? Answer with one word: a liquid color "
+        f"({', '.join(LIQUIDS)}), cubes, or empty.", v.actual, "content", with_plan=False)
 
-    # 2) plan color of a random tube (reading the HMI strip)
-    t = rng.choice(tubes)
-    add(f"According to the manufacturing plan, what color should tube {t.position} contain? Answer with one word.",
-        t.planned_color, "plan_color")
+    add(f"How many vials are visible on the track? Answer with an integer.", str(len(vials)), "count", with_plan=False)
 
-    # 3) yes/no match for a random tube
-    t = rng.choice(tubes)
-    add(
-        f"Does tube {t.position} match the manufacturing plan (correct color and a normal fill level)? Answer yes or no.",
-        "no" if t.status != STATUS_OK else "yes",
-        "match",
-    )
+    v = rng.choice(vials)
+    add(f"Does the vial at position {v.position} match the manufacturing plan (correct content and a normal "
+        f"fill level)? Answer yes or no.", "no" if v.status != STATUS_OK else "yes", "match")
 
-    # 4) list of deviating positions
-    dev = deviations(tubes)
-    add(
-        "List the tube positions that do NOT match the manufacturing plan, as comma-separated integers in "
-        "ascending order. Answer 'none' if every tube matches.",
-        ",".join(map(str, dev)) if dev else "none",
-        "deviation_list",
-    )
+    dev = deviations(vials)
+    add("List the positions whose vial does NOT match the manufacturing plan, as comma-separated integers in "
+        "ascending order. Answer 'none' if all match.", ",".join(map(str, dev)) if dev else "none", "deviation_list")
 
-    # 5) full structured report
-    add(
-        "Produce the inspection report as compact JSON with keys: tubes (list of {position, planned_color, "
-        "actual_color, fill_pct, status}), deviating_positions, pass. status is one of OK, wrong_color, "
-        "underfill, overfill, empty, contaminated. Output JSON only.",
-        json.dumps(report_json(tubes), separators=(",", ":")),
-        "report",
-    )
+    add("Produce the inspection report as compact JSON with keys: vials (list of {position, vial_id, planned, "
+        "actual, fill_pct, status}), deviating_positions, pass. status is one of OK, wrong_color, underfill, "
+        "overfill, empty, wrong_content. Output JSON only.",
+        json.dumps(report_json(vials), separators=(",", ":")), "report")
     return samples
 
 
 # --------------------------------------------------------------------------- main
-def build_split(name: str, count: int, out_root: Path, rng: random.Random, n_tubes_choices, defect_rate):
-    split_dir = out_root / name
-    img_dir = split_dir / "images"
+def build_split(name, count, out_root: Path, rng, n_choices, defect_rate):
+    split = out_root / name
+    img_dir = split / "images"
     img_dir.mkdir(parents=True, exist_ok=True)
-
-    annotations, ground_truth = [], {}
+    annotations, gt = [], {}
     for i in range(count):
-        n_tubes = rng.choice(n_tubes_choices)
-        tubes = sample_run(rng, n_tubes, defect_rate)
-        img = render(tubes, rng)
-        fname = f"tubes_{name}_{i:05d}.png"
+        vials = sample_run(rng, rng.choice(n_choices), defect_rate)
+        img = render(vials, rng)
+        fname = f"vials_{name}_{i:05d}.png"
         img.save(img_dir / fname)
         rel = f"images/{fname}"
-        annotations.extend(make_samples(rel, tubes, rng))
-        ground_truth[rel] = report_json(tubes)
-
-    (split_dir / "annotations.json").write_text(json.dumps(annotations, indent=1))
-    (split_dir / "ground_truth.json").write_text(json.dumps(ground_truth, indent=1))
-
-    with tarfile.open(split_dir / "images.tar.gz", "w:gz") as tar:
+        annotations.extend(make_samples(rel, vials, rng))
+        gt[rel] = {"plan_text": describe_plan(vials), **report_json(vials)}
+    (split / "annotations.json").write_text(json.dumps(annotations, indent=1))
+    (split / "ground_truth.json").write_text(json.dumps(gt, indent=1))
+    with tarfile.open(split / "images.tar.gz", "w:gz") as tar:
         tar.add(img_dir, arcname="images")
-
-    print(f"[{name}] {count} images -> {len(annotations)} samples at {split_dir}")
+    print(f"[{name}] {count} images -> {len(annotations)} samples at {split}")
 
 
 def main():
@@ -315,17 +329,13 @@ def main():
     ap.add_argument("--train", type=int, default=800)
     ap.add_argument("--val", type=int, default=200)
     ap.add_argument("--seed", type=int, default=42)
-    ap.add_argument("--defect-rate", type=float, default=0.22, help="per-tube probability of a defect")
-    ap.add_argument("--tubes", default="6,8,10", help="comma list of possible tube counts per rack")
-    args = ap.parse_args()
-
-    rng = random.Random(args.seed)
-    n_choices = [int(x) for x in args.tubes.split(",")]
-    out = Path(args.out)
-    build_split("train", args.train, out, rng, n_choices, args.defect_rate)
-    build_split("val", args.val, out, rng, n_choices, args.defect_rate)
-    print("Done. Upload each split folder (images.tar.gz + annotations.json) to the cluster/cloud storage "
-          "referenced by TRAIN_DATASET_URI / EVAL_DATASET_URI.")
+    ap.add_argument("--defect-rate", type=float, default=0.25, help="per-vial probability of a defect")
+    ap.add_argument("--vials", default="5,6,7,8", help="comma list of possible visible-vial counts")
+    a = ap.parse_args()
+    rng = random.Random(a.seed)
+    n_choices = [int(x) for x in a.vials.split(",")]
+    build_split("train", a.train, Path(a.out), rng, n_choices, a.defect_rate)
+    build_split("val", a.val, Path(a.out), rng, n_choices, a.defect_rate)
 
 
 if __name__ == "__main__":
