@@ -12,7 +12,7 @@ WORK="${WORK:-$LUSTRE_DIR/cosmos3tao}"
 IMAGE="${TAO_IMAGE:-nvcr.io/nvidia/tao/tao-toolkit:7.0.1-cosmos-rl}"
 ARCH="${ARCH:-$(uname -m)}"
 SQSH="${TAO_SQSH:-$WORK/sqsh/$(echo "$IMAGE" | tr '/:' '__')-$ARCH.sqsh}"
-[ -f "$SQSH" ] || SQSH="$WORK/sqsh/$(echo "$IMAGE" | tr '/:' '__').sqsh"
+[ -f "$SQSH" ] || { [ "$ARCH" = x86_64 ] && SQSH="$WORK/sqsh/$(echo "$IMAGE" | tr '/:' '__').sqsh"; } || true
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 GPUS="${GPUS:-4}"
 [ -f "$SQSH" ] && CONTAINER="$SQSH" || CONTAINER="${IMAGE/\//#}"

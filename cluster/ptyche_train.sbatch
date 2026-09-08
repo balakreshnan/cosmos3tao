@@ -25,7 +25,8 @@ WORK="${WORK:-$LUSTRE_DIR/cosmos3tao}"
 IMAGE="${TAO_IMAGE:-nvcr.io/nvidia/tao/tao-toolkit:7.0.1-cosmos-rl}"
 ARCH="${ARCH:-$(uname -m)}"
 SQSH="${TAO_SQSH:-$WORK/sqsh/$(echo "$IMAGE" | tr '/:' '__')-$ARCH.sqsh}"
-[ -f "$SQSH" ] || SQSH="$WORK/sqsh/$(echo "$IMAGE" | tr '/:' '__').sqsh"   # legacy name without arch
+# legacy sqsh name (no arch suffix) was imported on x86_64; only reuse it on x86_64 nodes
+[ -f "$SQSH" ] || { [ "$ARCH" = x86_64 ] && SQSH="$WORK/sqsh/$(echo "$IMAGE" | tr '/:' '__').sqsh"; } || true
 REPO_DIR="${REPO_DIR:-$SLURM_SUBMIT_DIR}"
 export GPUS="${GPUS:-4}" EPOCHS="${EPOCHS:-5}" RUN="cosmos3_nano_tube_lora_${SLURM_JOB_ID}"
 mkdir -p "$WORK/logs" "$WORK/results"
