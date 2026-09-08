@@ -31,7 +31,7 @@ fi
 # shellcheck disable=SC1091
 source "$WORK/venv/bin/activate"
 pip install -q --upgrade pip
-pip install -q pillow numpy pyyaml "huggingface_hub[cli]" tqdm
+pip install -q pillow numpy pyyaml huggingface_hub tqdm
 
 # ---------------------------------------------------------------- 2. dataset
 if [ ! -f "$WORK/data/tube_inspection/train/annotations.json" ]; then
@@ -44,8 +44,14 @@ fi
 # ---------------------------------------------------------------- 3. model
 MODEL_DIR="$WORK/models/$(basename "$MODEL_ID")"
 if [ ! -f "$MODEL_DIR/config.json" ]; then
-  echo ">> downloading $MODEL_ID to $MODEL_DIR (~33 GB, weights only)"
-  hf download "$MODEL_ID" --local-dir "$MODEL_DIR" --exclude 'assets/*' --exclude 'images/*'
+  echo ">> downloading $MODEL_ID to $MODEL_DIR (~33 GB, weights only) inside a SLURM allocation"
+  # Login nodes OOM-kill large downloads (Xet backend is memory hungry), so run it as a short job.
+  # The download is resumable; re-run this script if it is interrupted.
+  export HF_HUB_DISABLE_XET=1 HF_HUB_ENABLE_HF_TRANSFER=0 HF_HOME="$WORK/hf_cache"
+  srun -A "$ACCOUNT" -p "${PARTITION:-batch}" -N1 -n1 --cpus-per-task=16 --mem=64G --time=02:00:00 \
+    --job-name=hf-download --export=ALL \
+    "$WORK/venv/bin/hf" download "$MODEL_ID" --local-dir "$MODEL_DIR" \
+      --exclude 'assets/*' --exclude 'images/*' --max-workers 8
 else
   echo ">> model already present, skipping"
 fi
