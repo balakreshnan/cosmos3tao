@@ -57,9 +57,13 @@ else
 fi
 
 # ---------------------------------------------------------------- 4. container -> sqsh
-# enroot pulls the image for the CPU arch of the node doing the import (x86_64 on ptyche, aarch64 on
-# GB200/GB300 clusters such as lyris/theia), so key the sqsh file on the arch too.
+# enroot pulls the image for the CPU arch of the COMPUTE node doing the import (x86_64 on ptyche,
+# aarch64 on GB200/GB300 nodes as on hecate/lyris). Login nodes may differ from compute nodes, so ask
+# the partition for its arch and key the sqsh file on that.
+ARCH="${ARCH:-$(srun -A "$ACCOUNT" -p "${PARTITION:-batch}" -N1 -n1 --time=00:03:00 \
+        --job-name="$ACCOUNT-cosmos3.arch-probe" uname -m 2>/dev/null | tail -1)}"
 ARCH="${ARCH:-$(uname -m)}"
+echo ">> compute node arch: $ARCH"
 SQSH="$WORK/sqsh/$(echo "$IMAGE" | tr '/:' '__')-$ARCH.sqsh"
 if [ ! -f "$SQSH" ]; then
   echo ">> importing $IMAGE -> $SQSH (uses ~/.config/enroot/.credentials for nvcr.io)"
