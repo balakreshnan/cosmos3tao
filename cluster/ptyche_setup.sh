@@ -57,10 +57,13 @@ else
 fi
 
 # ---------------------------------------------------------------- 4. container -> sqsh
-SQSH="$WORK/sqsh/$(echo "$IMAGE" | tr '/:' '__').sqsh"
+# enroot pulls the image for the CPU arch of the node doing the import (x86_64 on ptyche, aarch64 on
+# GB200/GB300 clusters such as lyris/theia), so key the sqsh file on the arch too.
+ARCH="${ARCH:-$(uname -m)}"
+SQSH="$WORK/sqsh/$(echo "$IMAGE" | tr '/:' '__')-$ARCH.sqsh"
 if [ ! -f "$SQSH" ]; then
   echo ">> importing $IMAGE -> $SQSH (uses ~/.config/enroot/.credentials for nvcr.io)"
-  srun -A "$ACCOUNT" -p batch -N1 -n1 --cpus-per-task=4 --time=01:00:00 --job-name=enroot-import \
+  srun -A "$ACCOUNT" -p "${PARTITION:-batch}" -N1 -n1 --cpus-per-task=4 --time=01:00:00 --job-name=enroot-import \
     enroot import -o "$SQSH" "docker://${IMAGE/\//#}"
 else
   echo ">> sqsh already present, skipping"
@@ -74,5 +77,6 @@ Setup complete.
   sqsh    : $SQSH
 
 Submit the 4-GPU LoRA fine-tune with:
-  ACCOUNT=$ACCOUNT sbatch cluster/ptyche_train.sbatch
+  sbatch --account=$ACCOUNT --partition=${PARTITION:-batch} --export=ALL,ACCOUNT=$ACCOUNT,LUSTRE_DIR=$LUSTRE_DIR \
+         --output=$WORK/logs/%x-%j.out --error=$WORK/logs/%x-%j.err cluster/ptyche_train.sbatch
 EOF
