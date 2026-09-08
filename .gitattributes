@@ -1,0 +1,6 @@
+# Scripts run on the Linux cluster: always LF regardless of the committing OS.
+*.sh      text eol=lf
+*.sbatch  text eol=lf
+*.py      text eol=lf
+*.yaml    text eol=lf
+*.ps1     text eol=crlf
