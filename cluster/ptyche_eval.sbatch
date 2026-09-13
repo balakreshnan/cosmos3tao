@@ -52,6 +52,7 @@ CUDA_VISIBLE_DEVICES=0 python /tao-repo/cluster/eval_in_container.py --model $MO
 P1=$!
 CUDA_VISIBLE_DEVICES=1 python /tao-repo/cluster/eval_in_container.py --model $MODEL --annotations $VAL/annotations.json --media $VAL --limit $LIMIT --max-new-tokens $MAXTOK --out $R/eval_baseline > $R/eval_baseline.log 2>&1 &
 P2=$!
+set +e
 wait $P1; rc1=$?; wait $P2; rc2=$?
 echo "== finetuned exit $rc1, baseline exit $rc2"
 echo "== FINETUNED"; tail -n 40 $R/eval_finetuned.log
