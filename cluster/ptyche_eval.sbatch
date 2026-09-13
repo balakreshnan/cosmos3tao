@@ -25,7 +25,11 @@ IMAGE="${TAO_IMAGE:-nvcr.io/nvidia/tao/tao-toolkit:7.0.1-cosmos-rl}"
 ARCH="${ARCH:-$(uname -m)}"
 SQSH="${TAO_SQSH:-$WORK/sqsh/$(echo "$IMAGE" | tr '/:' '__')-$ARCH.sqsh}"
 [ -f "$SQSH" ] && CONTAINER="$SQSH" || CONTAINER="${IMAGE/\//#}"
-: "${RUN:?set RUN=<results run folder name, e.g. cosmos3_nano_tube_lora_3044273>}"
+# RUN = results folder name; defaults to the most recent training run that produced an output/ dir
+if [ -z "${RUN:-}" ]; then
+  RUN=$(ls -dt "$WORK"/results/cosmos3_nano_tube_lora_*/output 2>/dev/null | head -1 | xargs -r dirname | xargs -r basename)
+fi
+[ -n "${RUN:-}" ] && [ -d "$WORK/results/$RUN" ] || { echo "FATAL: no training run found under $WORK/results; set RUN=<folder>"; exit 1; }
 export RUN LIMIT="${LIMIT:-300}" MAXTOK="${MAXTOK:-768}"
 
 echo "== eval job $SLURM_JOB_ID node=$(hostname) run=$RUN limit=$LIMIT image=$CONTAINER"
