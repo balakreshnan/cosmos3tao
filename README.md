@@ -154,8 +154,12 @@ scp "bbalakreshna-mfa@login-lyris.nvidia.com:/lustre/fsw/general_sa/bbalakreshna
 .\.venv\Scripts\python.exe report\make_report.py --log results\train.log --spec results\train_spec.yaml --out results\report.html; Start-Process results\report.html
 ```
 
-Loss / lr / grad-norm curves with crosshair tooltips, smoothing, log axis, table view, dark mode, run config and
-checkpoint events, in one self-contained HTML file.
+One self-contained HTML page: executive summary (auto-written from the log), KPI tiles (best validation loss,
+training loss, generalization gap, steps, wall time, compute), loss-over-training chart with epoch bands and
+validation points, per-epoch table, learning-rate / gradient-norm / step-time charts, insights, configuration and
+reproduce commands. Crosshair tooltips, smoothing, log axis, data-table view, dark mode, print-friendly.
+Add `--cluster "lyris · gb200 · 1 node × 4 GB200" --job <jobid>` for the header. Example from the verified run:
+`report/run_lyris_gb200_3044273.html`.
 
 ## Running on another cluster
 
