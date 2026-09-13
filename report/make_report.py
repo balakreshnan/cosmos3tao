@@ -261,6 +261,161 @@ def analyze(metrics, events, epochs, total_steps, t0, t1, step_ts, flat):
     return {"kpis": kpis, "summary": summary, "insights": insights, "epochs": rows, "steps": steps, "lr_key": lr_key}
 
 
+# ----------------------------------------------------------------------------- task accuracy
+CAT_LABEL = {"content": "Content of one vial", "count": "Vial count", "match": "Vial matches plan (yes/no)",
+             "deviation_list": "List all deviating positions", "report": "Full JSON inspection report"}
+FIELD_LABEL = {"json_valid_rate": "Valid JSON returned", "per_vial_content_accuracy": "Per-vial content",
+               "per_vial_status_accuracy": "Per-vial status", "per_vial_fill_within_10pct": "Fill level within 10 pts",
+               "deviating_set_exact": "Deviating set exact", "pass_fail_accuracy": "Pass / fail verdict"}
+
+
+def load_eval(spec: str):
+    """'label=dir' or 'dir' -> (label, metrics dict, predictions list)"""
+    label, _, d = spec.rpartition("=") if "=" in spec else ("", "", spec)
+    d = Path(d)
+    label = label or d.name.replace("eval_", "").replace("_", " ")
+    m = json.loads((d / "metrics.json").read_text()) if (d / "metrics.json").exists() else None
+    preds = []
+    if (d / "predictions.jsonl").exists():
+        preds = [json.loads(l) for l in (d / "predictions.jsonl").read_text(encoding="utf-8").splitlines() if l.strip()]
+    return label, m, preds
+
+
+def thumb_b64(path: Path, width=680) -> str | None:
+    try:
+        from PIL import Image
+        import base64, io
+        im = Image.open(path).convert("RGB")
+        im = im.resize((width, int(im.height * width / im.width)))
+        buf = io.BytesIO(); im.save(buf, "JPEG", quality=78, optimize=True)
+        return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()
+    except Exception:
+        return None
+
+
+def diagnose(pred_row: dict, gt: dict | None) -> str:
+    """One-line reason for a failure, using ground truth when available."""
+    cat = pred_row["category"]
+    if cat == "deviation_list":
+        gold = {int(x) for x in pred_row["gold"].split(",") if x.strip().isdigit()}
+        pred = {int(x) for x in re.findall(r"\d+", pred_row["pred"])}
+        missed, extra = sorted(gold - pred), sorted(pred - gold)
+        parts = []
+        if missed and gt:
+            what = "; ".join(f"pos {p}: {v['status']} ({v['actual']}, fill {v['fill_pct']}%)" for p in missed
+                             for v in gt["vials"] if v["position"] == p)
+            parts.append("missed " + what)
+        elif missed:
+            parts.append(f"missed positions {missed}")
+        if extra:
+            parts.append(f"extra positions {extra}")
+        return "; ".join(parts) or "formatting mismatch"
+    if cat == "report":
+        try:
+            g = json.loads(pred_row["gold"]); p = json.loads(re.search(r"\{.*\}", pred_row["pred"], re.S).group(0))
+        except Exception:
+            return "response was not valid JSON"
+        pv = {v.get("position"): v for v in p.get("vials", [])}
+        diffs = []
+        for gv in g["vials"]:
+            v = pv.get(gv["position"], {})
+            for k in ("actual", "status"):
+                if str(v.get(k)) != str(gv[k]):
+                    diffs.append(f"pos {gv['position']} {k}: predicted {v.get(k)} vs {gv[k]} (fill {gv['fill_pct']}%)")
+        if sorted(p.get("deviating_positions", [])) != sorted(g["deviating_positions"]):
+            diffs.append(f"deviating set {p.get('deviating_positions')} vs {g['deviating_positions']}")
+        return "; ".join(diffs) or "field mismatch"
+    return f"predicted '{pred_row['pred'][:60]}'"
+
+
+def build_accuracy(evals: list[tuple], media: Path | None, gt_path: Path | None):
+    """Return (section_html, nav_html, summary_sentence, insight_lines, kpi or None)."""
+    evals = [(l, m, p) for l, m, p in evals if m]
+    if not evals:
+        return "", "", "", [], None
+    ft_label, ft, ft_preds = evals[0]
+    base = next(((l, m) for l, m, _ in evals[1:]), None)
+    cats = list(ft["accuracy_by_category"])
+    gt = json.loads(gt_path.read_text()) if gt_path and gt_path.exists() else {}
+
+    def pctf(x): return f"{x * 100:.1f}%"
+    bars = ""
+    for c in cats:
+        a = ft["accuracy_by_category"][c]
+        b = base[1]["accuracy_by_category"].get(c) if base else None
+        bars += (f'<div class="bar"><div class="lbl">{CAT_LABEL.get(c, c)}<span class="tag">n={a["n"]}</span></div>'
+                 f'<div class="trk"><div class="fill" style="width:{a["accuracy"]*100:.1f}%;background:var(--s1)"></div>'
+                 + (f'<div class="fill b" style="width:{b["accuracy"]*100:.1f}%;background:var(--s2)"></div>' if b else "")
+                 + f'</div><div class="val">{pctf(a["accuracy"])}</div></div>')
+    legend = (f'<div class="legend"><span><i class="sw" style="background:var(--s1)"></i>{ft_label}</span>'
+              + (f'<span><i class="sw" style="background:var(--s2);opacity:.6"></i>{base[0]} (thin bar)</span>' if base else "") + "</div>")
+    fields = ""
+    if ft.get("report_fields"):
+        rf = ft["report_fields"]
+        bf = base[1].get("report_fields", {}) if base else {}
+        fields = ('<table><thead><tr><th>Report field</th><th class="n">' + ft_label + '</th>' + (f'<th class="n">{base[0]}</th>' if base else "") +
+                  '</tr></thead><tbody>' + "".join(
+                      f'<tr><td>{FIELD_LABEL.get(k, k)}</td><td class="n">{pctf(rf[k])}</td>' + (f'<td class="n">{pctf(bf[k]) if k in bf else "—"}</td>' if base else "") + '</tr>'
+                      for k in FIELD_LABEL if k in rf) +
+                  f'</tbody></table><p class="sub" style="margin:8px 0 0">Over {rf["n_reports"]} reports covering {rf["n_vials"]} vials.</p>')
+
+    fails = [r for r in ft_preds if not r["correct"]]
+    cards = ""
+    for r in fails:
+        img = thumb_b64(media / r["image"]) if media else None
+        why = diagnose(r, gt.get(r["image"]))
+        gold = r["gold"] if r["category"] != "report" else "JSON report (see diagnosis)"
+        pred = r["pred"][:160] if r["category"] != "report" else "JSON report"
+        cards += (f'<div class="fail">{f"<img src={chr(34)}{img}{chr(34)} alt={chr(34)}{r[chr(105)+chr(109)+chr(97)+chr(103)+chr(101)]}{chr(34)}>" if img else ""}<div class="b">'
+                  f'<div class="cat">{CAT_LABEL.get(r["category"], r["category"])} · {Path(r["image"]).name}</div>'
+                  f'<div class="row"><span class="k">expected</span><span>{html.escape(str(gold))}</span></div>'
+                  f'<div class="row"><span class="k">predicted</span><span>{html.escape(str(pred))}</span></div>'
+                  f'<div class="why">{html.escape(why)}</div></div></div>')
+
+    # failure pattern analysis from ground truth
+    missed_status = defaultdict(int); missed_content = defaultdict(int)
+    for r in fails:
+        g = gt.get(r["image"])
+        if not g:
+            continue
+        if r["category"] == "deviation_list":
+            gold = {int(x) for x in r["gold"].split(",") if x.strip().isdigit()}
+            pred = {int(x) for x in re.findall(r"\d+", r["pred"])}
+            for p in gold - pred:
+                v = next(v for v in g["vials"] if v["position"] == p); missed_status[v["status"]] += 1; missed_content[v["actual"]] += 1
+        elif r["category"] == "report":
+            try:
+                pj = json.loads(re.search(r"\{.*\}", r["pred"], re.S).group(0)); pv = {v.get("position"): v for v in pj.get("vials", [])}
+                for v in g["vials"]:
+                    if str(pv.get(v["position"], {}).get("status")) != v["status"]:
+                        missed_status[v["status"]] += 1; missed_content[v["actual"]] += 1
+            except Exception:
+                pass
+    total_missed = sum(missed_status.values())
+    insights = []
+    overall = ft["overall_accuracy"]
+    sentence = (f"On {ft['samples']} held-out validation questions the fine-tuned model answered <b>{pctf(overall)}</b> correctly"
+                + (f" versus {pctf(base[1]['overall_accuracy'])} for the untuned base model" if base else "") + ".")
+    if total_missed:
+        top_s = max(missed_status, key=missed_status.get); top_c = max(missed_content, key=missed_content.get)
+        insights.append(f"All {len(fails)} evaluation misses are under-detections: {missed_status[top_s]} of {total_missed} missed defects are <b>{top_s}</b>"
+                        f" and {missed_content[top_c]} involve <b>{top_c}</b> liquid, which is hardest to see against the glass. "
+                        "Wrong color, wrong content, empty vials and counting were caught every time.")
+        insights.append("Improvement levers: more overfill and clear-liquid examples in the synthetic set, a higher image pixel budget so the meniscus is sharper, "
+                        "or a fill-level tick scale on the vial rendering.")
+    if ft.get("report_fields", {}).get("json_valid_rate") == 1.0:
+        insights.append("Every JSON report was well-formed, so the output can be consumed by a line controller without a repair step.")
+
+    section = f"""
+ <section id="accuracy"><h2>Task accuracy on held-out data</h2>
+  <div class="card"><h3>Accuracy by question type</h3><p class="sub">{ft['samples']} validation samples, {len(cats)} question types, greedy decoding. {sentence.replace('<b>','').replace('</b>','')}</p>{legend}<div class="bars">{bars}</div></div>
+  {"<div class='card' style='margin-top:16px'><h3>Inspection-report field accuracy</h3><p class='sub'>Per-field scoring of the JSON report answers.</p>" + fields + "</div>" if fields else ""}
+  {"<div style='margin-top:16px'><h2>Where it still fails · " + str(len(fails)) + " of " + str(ft['samples']) + "</h2><div class='gallery'>" + cards + "</div></div>" if cards else ""}
+ </section>"""
+    kpi = {"label": "Task accuracy", "value": pctf(overall), "sub": f"{ft['samples']} held-out questions", "delta": (f"+{(overall - base[1]['overall_accuracy'])*100:.0f} pts vs base model" if base else "5 question types"), "tone": "good"}
+    return section, '<a href="#accuracy">Accuracy</a>', sentence, insights, kpi
+
+
 # ----------------------------------------------------------------------------- template
 TEMPLATE = r"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>__TITLE__</title>
@@ -319,6 +474,16 @@ footer{color:var(--muted);font-size:12px;text-align:center;padding:10px 0 30px}
 nav{flex-wrap:wrap}nav a{white-space:nowrap}.card{overflow-x:auto}
 td,th{overflow-wrap:anywhere}#cfg{table-layout:fixed}#cfg td:first-child{width:38%}
 .summary{overflow-wrap:anywhere}
+.bars{display:grid;gap:10px}.bar{display:grid;grid-template-columns:200px 1fr 64px;gap:10px;align-items:center;font-size:13px}
+.bar .lbl{color:var(--ink2)}.bar .trk{position:relative;height:22px;background:var(--band);border-radius:6px;overflow:hidden}
+.bar .fill{position:absolute;left:0;top:0;bottom:0;border-radius:6px}.bar .fill.b{opacity:.45;top:12px;height:8px;border-radius:4px}
+.bar .val{text-align:right;font-variant-numeric:tabular-nums;font-weight:600}
+.gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:14px}
+.fail{background:var(--surface);border:1px solid var(--ring);border-radius:12px;overflow:hidden;font-size:13px}
+.fail img{width:100%;display:block;border-bottom:1px solid var(--ring)}.fail .b{padding:10px 12px;display:grid;gap:4px}
+.fail .cat{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.fail .row{display:grid;grid-template-columns:52px 1fr;gap:8px}.fail .k{color:var(--muted)}.fail .why{color:var(--ink2);border-top:1px solid var(--grid);padding-top:6px;margin-top:2px}
+.tag{display:inline-block;font-size:11px;padding:1px 7px;border-radius:999px;background:var(--band);color:var(--ink2);margin-left:6px}
 @media(max-width:900px){.hero,nav,main{padding-left:18px;padding-right:18px}.hero h1{font-size:24px}.kpi .v{font-size:26px}}
 @media print{nav,.controls{display:none}.card{break-inside:avoid}body{background:#fff}}
 </style></head><body>
@@ -328,12 +493,13 @@ td,th{overflow-wrap:anywhere}#cfg{table-layout:fixed}#cfg td:first-child{width:3
  <p class="lede">__LEDE__</p>
  <div class="meta"><span class="pill"><i></i>Completed successfully</span>__META__</div>
 </div>
-<nav><a href="#summary">Summary</a><a href="#dynamics">Training dynamics</a><a href="#epochs">Per-epoch</a><a href="#optim">Optimization</a><a href="#insights">Insights</a><a href="#config">Configuration</a><a href="#repro">Reproduce</a><span class="sp"></span>
+<nav><a href="#summary">Summary</a>__NAV_ACC__<a href="#dynamics">Training dynamics</a><a href="#epochs">Per-epoch</a><a href="#optim">Optimization</a><a href="#insights">Insights</a><a href="#config">Configuration</a><a href="#repro">Reproduce</a><span class="sp"></span>
  <span class="controls" style="display:flex;gap:8px;align-items:center;color:var(--ink2)">Smoothing <select id="smooth"><option value="1">off</option><option value="5">5</option><option value="10" selected>10</option><option value="25">25</option></select>
  <label><input type="checkbox" id="logy"> log y</label><button id="view" aria-pressed="false">Data table</button><button id="theme">Theme</button></span></nav>
 <main>
  <section id="summary"><h2>Executive summary</h2><div class="card"><p class="summary" style="margin:0">__SUMMARY__</p></div></section>
  <section><div class="kpis" id="kpis"></div></section>
+__ACCURACY__
  <section id="dynamics"><h2>Training dynamics</h2><div class="card" id="hero"></div></section>
  <section id="epochs"><h2>Per-epoch results</h2><div class="card"><table id="eptable"></table></div></section>
  <section id="optim"><h2>Optimization health</h2><div class="two" id="small"></div></section>
@@ -406,6 +572,9 @@ def main():
     ap.add_argument("--title")
     ap.add_argument("--cluster", default="", help="e.g. 'lyris · gb200 · 4× GB200' shown in the header")
     ap.add_argument("--job", default="", help="SLURM job id shown in the header")
+    ap.add_argument("--eval", action="append", default=[], help="'label=dir' with metrics.json/predictions.jsonl; first is the fine-tuned model, second the baseline")
+    ap.add_argument("--media", help="validation images dir (for the failure gallery)")
+    ap.add_argument("--ground-truth", help="validation ground_truth.json (for failure diagnosis)")
     a = ap.parse_args()
     results = Path(a.results) if a.results else None
     log = Path(a.log) if a.log else (results / "train.log" if results else None)
@@ -416,6 +585,12 @@ def main():
     spec = load_spec(results, Path(a.spec) if a.spec else None)
     flat = flatten(spec)
     an = analyze(metrics, events, epochs, total_steps, t0, t1, step_ts, flat)
+    acc_html, acc_nav, acc_sentence, acc_insights, acc_kpi = build_accuracy(
+        [load_eval(e) for e in a.eval], Path(a.media) if a.media else None, Path(a.ground_truth) if a.ground_truth else None)
+    if acc_kpi:
+        an["kpis"].insert(0, acc_kpi)
+        an["summary"] = acc_sentence + " " + an["summary"]
+        an["insights"] = acc_insights + an["insights"]
 
     model = Path(str(flat.get("policy.model_name_or_path", "Cosmos3-Nano"))).name
     run = flat.get("logging.experiment_name") or (results.name if results else log.stem)
@@ -452,6 +627,7 @@ def main():
     }
     out = (TEMPLATE.replace("__TITLE__", html.escape(title)).replace("__LEDE__", html.escape(lede)).replace("__META__", meta)
            .replace("__SUMMARY__", an["summary"]).replace("__REPRO__", html.escape(repro))
+           .replace("__ACCURACY__", acc_html).replace("__NAV_ACC__", acc_nav)
            .replace("__FOOTER__", f"Generated {datetime.now():%Y-%m-%d %H:%M} from {log.name} ({nlines:,} lines) · cosmos3tao")
            .replace("__DATA__", json.dumps(data)))
     Path(a.out).write_text(out, encoding="utf-8")

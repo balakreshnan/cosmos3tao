@@ -219,3 +219,6 @@ __marimo__/
 
 # local copies of cluster run outputs
 results/
+
+# generated dataset (regenerate with dataset/generate_tube_dataset.py)
+data/tube_inspection/

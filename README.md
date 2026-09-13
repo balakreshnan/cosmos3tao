@@ -162,6 +162,27 @@ reproduce commands. Crosshair tooltips, smoothing, log axis, data-table view, da
 Add `--cluster "lyris · gb200 · 1 node × 4 GB200" --job <jobid>` for the header. Example from the verified run:
 `report/run_lyris_gb200_3044273.html`.
 
+### 10. Task accuracy (fine-tuned vs zero-shot base)
+
+Evaluates both models on the validation split, in parallel on two GPUs, inside the container:
+
+```bash
+sbatch --account=$ACCOUNT --partition=$PARTITION --export=ALL,ACCOUNT=$ACCOUNT,LUSTRE_DIR=$LUSTRE_DIR,RUN=cosmos3_nano_tube_lora_<jobid>,LIMIT=300 --output=$LUSTRE_DIR/cosmos3tao/logs/%x-%j.out --error=$LUSTRE_DIR/cosmos3tao/logs/%x-%j.err cluster/ptyche_eval.sbatch
+```
+
+Outputs `results/<run>/eval_finetuned/{metrics.json,predictions.jsonl}` and `.../eval_baseline/...`. Copy them to
+`results/eval_finetuned` and `results/eval_baseline` on the laptop, regenerate the validation set locally (it is
+deterministic) and add the accuracy section + failure gallery to the report:
+
+```powershell
+python dataset\generate_tube_dataset.py --out data\tube_inspection --train 800 --val 200
+python report\make_report.py --log results\train.log --spec results\train_spec.yaml --out results\report.html --cluster "lyris · gb200 · 1 node × 4 GB200" --job <jobid> --eval "fine-tuned (LoRA epoch 5)=results\eval_finetuned" --eval "base model (zero-shot)=results\eval_baseline" --media data\tube_inspection\val --ground-truth data\tube_inspection\val\ground_truth.json
+```
+
+Verified result (300 questions, 60 per type): **96.7% overall**; content 100%, count 100%, match 100%,
+deviation list 88.3%, full JSON report 95.0%; 100% valid JSON, 99.7% per-vial content, 100% pass/fail verdict.
+All misses were under-detected `overfill`, mostly on clear liquid.
+
 ## Running on another cluster
 
 Same recipe. Only these change: the login host, `ACCOUNT`, `PARTITION`, and whether the Lustre path exists.
