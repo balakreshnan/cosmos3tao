@@ -31,7 +31,8 @@ image. The model reports actual content, fill level, per-vial status (`OK`, `wro
 | `specs/cosmos3_nano_lora_sft.yaml` | TAO cosmos-rl LoRA SFT spec (LoRA r=16 on q/k/v/o, lr 2e-5, 5 epochs) |
 | `specs/evaluate.yaml`, `specs/inference.yaml` | TAO evaluate / inference specs |
 | `dataset/generate_tube_dataset.py` | Synthetic side-view images + LLaVA-format `annotations.json` |
-| `report/make_report.py` | Interactive HTML training report from `train.log` (`report/sample_report.html` is an example) |
+| `cluster/ptyche_eval.sbatch` + `cluster/eval_in_container.py` | **Cluster:** task accuracy of fine-tuned adapter vs zero-shot base on the val split |
+| `report/make_report.py` | Executive HTML training report from `train.log` (`report/run_lyris_gb200_3044273.html` is the real example) |
 | `inspect/inspect_tubes.py` | Inspection client + scorer (hosted Cosmos 3 reasoner or your fine-tuned endpoint) |
 | `setup.ps1`, `requirements.txt` | Windows: Python 3.14 venv for local tooling only |
 | `cluster/submit_tao_job.sh` | Alternative path through a TAO FTMS API deployment, if you have one |
