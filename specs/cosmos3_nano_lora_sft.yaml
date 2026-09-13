@@ -6,7 +6,7 @@ train:
   resume: false
   epoch: 5
   compile: false
-  train_batch_per_replica: 1
+  train_batch_per_replica: 8    # samples per optimizer step per replica; must be divisible by train_policy.mini_batch
   output_dir: "output"
   optm_lr: 2.0e-5          # LoRA tolerates a higher LR than full SFT (doc default 1e-6 is for full SFT). Keep the ".0": YAML reads 2e-5 as a string.
   optm_impl: "foreach"
@@ -32,7 +32,7 @@ train:
     export_safetensors: true
   train_policy:
     type: "sft"
-    mini_batch: 4
+    mini_batch: 2                 # micro-batch per forward pass -> 4 accumulation steps per optimizer step
     enable_dataset_cache: true
     dataloader_num_workers: 8
     dataloader_prefetch_factor: 8
