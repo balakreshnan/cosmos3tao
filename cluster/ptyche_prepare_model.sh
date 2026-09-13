@@ -24,9 +24,13 @@ if [ ! -f "$DONOR/config.json" ]; then
   echo ">> downloading Qwen/Qwen3-VL-8B-Instruct config files -> $DONOR"
   # shellcheck disable=SC1091
   source "$WORK/venv/bin/activate"
-  HF_HUB_DISABLE_XET=1 hf download Qwen/Qwen3-VL-8B-Instruct --local-dir "$DONOR" \
-    --include config.json generation_config.json model.safetensors.index.json
+  # filenames are positional for `hf download` (not --include)
+  HF_HUB_DISABLE_XET=1 hf download Qwen/Qwen3-VL-8B-Instruct \
+    config.json generation_config.json model.safetensors.index.json --local-dir "$DONOR"
 fi
+for f in config.json model.safetensors.index.json; do
+  [ -f "$DONOR/$f" ] || { echo "FATAL: donor file $DONOR/$f missing after download"; exit 1; }
+done
 
 # 2. pick the sqsh for this cluster's compute arch
 ARCH="$(srun -A "$ACCOUNT" -p "$PARTITION" -N1 -n1 --time=00:03:00 --job-name="$ACCOUNT-cosmos3.arch-probe" uname -m 2>/dev/null | tail -1)"
@@ -39,11 +43,13 @@ echo ">> converting $SRC -> $DST"
 srun -A "$ACCOUNT" -p "$PARTITION" -N1 -n1 --time=01:00:00 --job-name="$ACCOUNT-cosmos3.convert" \
   --container-image="$CONTAINER" --container-mounts="$WORK:/tao-workspace,$REPO_DIR:/tao-repo:ro" \
   --no-container-remap-root \
-  bash -lc 'source /opt/venv/cosmos_rl/bin/activate 2>/dev/null || true; set -e
-    python /tao-repo/cluster/convert_omni_to_qwen3vl.py --src /tao-workspace/models/Cosmos3-Nano \
+  bash -c 'set -e; PY=/opt/venv/cosmos_rl/bin/python; [ -x "$PY" ] || PY=python
+    echo "-- using $PY ($($PY --version 2>&1))"
+    $PY -c "import torch, safetensors; print(\"torch\", torch.__version__, \"safetensors\", safetensors.__version__)"
+    $PY /tao-repo/cluster/convert_omni_to_qwen3vl.py --src /tao-workspace/models/Cosmos3-Nano \
       --donor /tao-workspace/models/Qwen3-VL-8B-Instruct-donor --dst /tao-workspace/models/Cosmos3-Nano-qwen3vl
     echo "-- verifying load with transformers AutoConfig:"
-    python -c "from transformers import AutoConfig; c=AutoConfig.from_pretrained(\"/tao-workspace/models/Cosmos3-Nano-qwen3vl\"); print(c.model_type, c.architectures)"'
+    $PY -c "from transformers import AutoConfig; c=AutoConfig.from_pretrained(\"/tao-workspace/models/Cosmos3-Nano-qwen3vl\"); print(c.model_type, c.architectures)"'
 
 echo
 echo "Prepared model: $DST"
