@@ -84,6 +84,9 @@ bash cluster/ptyche_interactive.sh
 bash /tao-repo/cluster/train_in_container.sh
 ```
 
+Supported GPUs for the TAO 7.0.1 cosmos-rl image: H100/A100 (x86) and GB200 (arm64, sm_100). GB300 (sm_103)
+fails at the first CUDA kernel with `nvrtc: error: invalid value for --gpu-architecture`; use partition `gb200`.
+
 Knobs: `GPUS=4 EPOCHS=5 sbatch cluster/ptyche_train.sbatch`. If the image exposes a different launcher
 than `cosmos_rl train -e <spec> -r <results>`, the preflight prints what is on PATH; set
 `TAO_TRAIN_CMD` accordingly. Results, spec, `train.log` and `status.json` land in

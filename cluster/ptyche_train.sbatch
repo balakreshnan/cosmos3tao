@@ -13,6 +13,8 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --time=5:00:00
 # NOTE: Pre-Tyche has no "gpu" GRES; nodes come whole. GPUS below limits the job to N devices.
+# NOTE: TAO 7.0.1 cosmos-rl image's CUDA/NVRTC does not know GB300 (sm_103): training dies with
+#       "nvrtc: error: invalid value for --gpu-architecture". Use GB200 (sm_100, lyris gb200) or H100/x86.
 #SBATCH --job-name=general_sa-cosmos3.tao-finetune
 #SBATCH --no-requeue
 #SBATCH --output=/lustre/fsw/general_sa/%u/cosmos3tao/logs/%x-%j.out
