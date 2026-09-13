@@ -18,7 +18,14 @@ export CUDA_VISIBLE_DEVICES="$(seq -s, 0 $((GPUS - 1)))"
 EPOCHS="${EPOCHS:-5}"
 RUN="${RUN:-cosmos3_nano_tube_lora_${SLURM_JOB_ID:-manual}_$(date +%Y%m%d_%H%M%S)}"
 RESULTS="$C_WORK/results/$RUN"
-MODEL="$C_WORK/models/Cosmos3-Nano"
+# The raw HF download is model_type=cosmos3_omni, which this image's Transformers cannot load. Use the
+# Qwen3-VL conversion produced by cluster/ptyche_prepare_model.sh.
+MODEL="${MODEL:-$C_WORK/models/Cosmos3-Nano-qwen3vl}"
+if [ ! -f "$MODEL/config.json" ]; then
+  echo "FATAL: prepared model not found at $MODEL"
+  echo "       run on the login node:  bash cluster/ptyche_prepare_model.sh   (converts Cosmos3-Nano -> Qwen3-VL layout)"
+  exit 2
+fi
 TRAIN_ROOT="$C_WORK/data/tube_inspection/train"
 VAL_ROOT="$C_WORK/data/tube_inspection/val"
 mkdir -p "$RESULTS"
@@ -32,8 +39,7 @@ echo "-- entrypoints on PATH:"
 for e in cosmos_rl cosmos-rl tao; do
   if command -v "$e" >/dev/null 2>&1; then echo "   $e -> $(command -v $e)"; else echo "   ($e not found)"; fi
 done
-[ -f "$MODEL/config.json" ] || { echo "FATAL: model not found at $MODEL (run cluster/ptyche_setup.sh)"; exit 2; }
-echo "-- model_type: $(python -c "import json;print(json.load(open('$MODEL/config.json')).get('model_type'))")"
+echo "-- model: $MODEL  model_type: $(python -c "import json;print(json.load(open('$MODEL/config.json')).get('model_type'))")"
 [ -f "$TRAIN_ROOT/annotations.json" ] || { echo "FATAL: dataset not found at $TRAIN_ROOT"; exit 2; }
 python -c "import json;print('-- train samples:',len(json.load(open('$TRAIN_ROOT/annotations.json'))))"
 python -c "import json;print('-- val samples:',len(json.load(open('$VAL_ROOT/annotations.json'))))"

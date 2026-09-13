@@ -27,6 +27,7 @@ python inspect\inspect_tubes.py --image plant.jpg --plan "position 1 (VIAL 0019)
 | `specs/cosmos3_nano_lora_sft.yaml` | TAO cosmos-rl LoRA SFT spec (4 GPUs) |
 | `specs/evaluate.yaml`, `specs/inference.yaml` | TAO evaluate / inference specs |
 | `cluster/ptyche_setup.sh` | **Cluster, once:** venv on Lustre, dataset, model download, container → sqsh |
+| `cluster/ptyche_prepare_model.sh`, `cluster/convert_omni_to_qwen3vl.py` | **Cluster, once:** Cosmos3-Nano (omni) → Qwen3-VL HF checkpoint |
 | `cluster/ptyche_train.sbatch` | **Cluster:** 1 node × 4 GPU batch job |
 | `cluster/ptyche_interactive.sh` | **Cluster:** same allocation as an interactive `--pty bash` in the TAO container |
 | `cluster/train_in_container.sh` | Runs inside the container: preflight, render spec, launch training |
@@ -49,6 +50,14 @@ One-time setup (venv + dataset + ~33 GB model download + container import):
 
 ```bash
 bash cluster/ptyche_setup.sh
+```
+
+Convert the checkpoint once. The Hugging Face download is `model_type=cosmos3_omni` (reasoner + video generator in
+one Omni checkpoint), which the TAO 7.0.1 cosmos-rl image cannot load. This extracts the reasoner and vision tower
+into a standard Qwen3-VL checkpoint (`models/Cosmos3-Nano-qwen3vl`), running inside the container as a short job:
+
+```bash
+bash cluster/ptyche_prepare_model.sh
 ```
 
 Submit the batch fine-tune:
