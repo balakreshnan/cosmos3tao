@@ -52,7 +52,7 @@ Run everything on the cluster login node. Re-export the variables in every new s
 ### 0. Log in
 
 ```bash
-ssh bbalakreshna-mfa@login-lyris.nvidia.com
+ssh <user>-mfa@login-lyris.nvidia.com
 ```
 
 ### 1. Environment variables
@@ -143,11 +143,11 @@ New-Item -ItemType Directory -Force results | Out-Null
 ```
 
 ```powershell
-scp bbalakreshna-mfa@login-lyris.nvidia.com:/lustre/fsw/general_sa/bbalakreshna/cosmos3tao/results/cosmos3_nano_tube_lora_<jobid>/train.log results\
+scp <user>-mfa@login-lyris.nvidia.com:/lustre/fsw/general_sa/<user>/cosmos3tao/results/cosmos3_nano_tube_lora_<jobid>/train.log results\
 ```
 
 ```powershell
-scp "bbalakreshna-mfa@login-lyris.nvidia.com:/lustre/fsw/general_sa/bbalakreshna/cosmos3tao/results/cosmos3_nano_tube_lora_<jobid>/train_spec.*" results\
+scp "<user>-mfa@login-lyris.nvidia.com:/lustre/fsw/general_sa/<user>/cosmos3tao/results/cosmos3_nano_tube_lora_<jobid>/train_spec.*" results\
 ```
 
 ```powershell
