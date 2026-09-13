@@ -37,8 +37,13 @@ def load_model(model_dir: str, adapter: str | None, device: str):
         from transformers import Qwen3VLForConditionalGeneration as Cls
     except ImportError:
         from transformers import AutoModelForImageTextToText as Cls
+    # cuDNN fused SDPA has no valid execution plan for some shapes on GB200 -> use flash/math SDPA kernels
+    try:
+        torch.backends.cuda.enable_cudnn_sdp(False)
+    except Exception:
+        pass
     processor = AutoProcessor.from_pretrained(model_dir)
-    model = Cls.from_pretrained(model_dir, torch_dtype=torch.bfloat16, device_map=device)
+    model = Cls.from_pretrained(model_dir, torch_dtype=torch.bfloat16, device_map=device, attn_implementation="sdpa")
     model.eval()
     if adapter:
         apply_adapter(model, Path(adapter))
@@ -49,15 +54,6 @@ def apply_adapter(model, adir: Path):
     files = sorted(adir.rglob("*.safetensors"))
     if not files:
         raise SystemExit(f"no safetensors under {adir}")
-    if (adir / "adapter_config.json").exists():
-        try:
-            from peft import PeftModel
-            print(f"-- loading PEFT adapter from {adir}")
-            merged = PeftModel.from_pretrained(model, str(adir)).merge_and_unload()
-            model.__dict__.update(merged.__dict__)
-            return
-        except Exception as e:  # fall through to manual merge
-            print(f"-- peft unavailable/failed ({e}); merging LoRA weights manually")
     keys = []
     for f in files:
         with safe_open(str(f), "pt") as sf:
@@ -73,32 +69,52 @@ def apply_adapter(model, adir: Path):
         alpha = cfg.get("lora_alpha") or 32
         scale = alpha / r
         print(f"-- manual LoRA merge: {len(lora_keys)//2} modules, scale alpha/r = {alpha}/{r}")
+        print("   sample adapter keys:", lora_keys[:3])
+        print("   sample base keys:   ", [k for k in sd if k.endswith("q_proj.weight")][:2])
         tensors = {}
         for f in files:
             with safe_open(str(f), "pt") as sf:
                 for k in sf.keys():
                     if "lora_" in k:
                         tensors[k] = sf.get_tensor(k)
-        merged = 0
+        # index base weights by their module path so we can match adapter keys by suffix
+        base_by_suffix: dict[str, list[str]] = defaultdict(list)
+        for k in sd:
+            if k.endswith(".weight"):
+                parts = k[:-len(".weight")].split(".")
+                for n in range(1, min(6, len(parts)) + 1):
+                    base_by_suffix[".".join(parts[-n:])].append(k)
+
+        def find_target(adapter_key: str):
+            mod = re.sub(r"\.lora_[AB](\.[^.]+)?\.weight$", "", adapter_key)
+            parts = [p for p in mod.split(".") if p not in ("base_model", "policy")]
+            for n in range(min(6, len(parts)), 0, -1):
+                hits = base_by_suffix.get(".".join(parts[-n:]), [])
+                if len(hits) == 1:
+                    return hits[0]
+            return None
+
+        merged, unmatched = 0, []
         for ka, A in tensors.items():
             if "lora_A" not in ka:
                 continue
             kb = ka.replace("lora_A", "lora_B")
             if kb not in tensors:
                 continue
-            base = re.sub(r"\.lora_A(\.\w+)?\.weight$", ".weight", ka)
-            base = re.sub(r"^(base_model\.model\.|policy\.|model\.model\.)", "model.", base) if base not in sd else base
-            cand = [base, base.replace("model.language_model.", "model."), "model." + base, base.replace("model.", "model.language_model.", 1)]
-            tgt = next((c for c in cand if c in sd), None)
+            tgt = find_target(ka)
             if tgt is None:
-                continue
+                unmatched.append(ka); continue
             W = sd[tgt]
             delta = (tensors[kb].to(torch.float32) @ A.to(torch.float32)) * scale
+            if delta.shape != W.shape:
+                unmatched.append(f"{ka} shape {tuple(delta.shape)} vs {tuple(W.shape)}"); continue
             W.add_(delta.to(W.dtype).to(W.device))
             merged += 1
-        print(f"-- merged {merged} LoRA deltas into base weights")
+        print(f"-- merged {merged} LoRA deltas into base weights; unmatched: {len(unmatched)}")
+        if unmatched[:5]:
+            print("   unmatched examples:", unmatched[:5])
         if merged == 0:
-            raise SystemExit("LoRA keys found but none matched the base model; inspect key names")
+            raise SystemExit("LoRA keys found but none matched the base model; see sample keys above")
     else:
         print(f"-- loading full weights from {adir} ({len(keys)} tensors)")
         state = {}
