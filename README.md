@@ -92,6 +92,21 @@ than `cosmos_rl train -e <spec> -r <results>`, the preflight prints what is on P
 `TAO_TRAIN_CMD` accordingly. Results, spec, `train.log` and `status.json` land in
 `$LUSTRE_DIR/cosmos3tao/results/<run>/`.
 
+## Training report (interactive HTML)
+
+Copy the run folder (without the multi-GB checkpoints) from the cluster and build a self-contained report:
+
+```bash
+rsync -av --exclude 'checkpoints' --exclude 'safetensors' <user>@login-lyris:/lustre/fsw/general_sa/<user>/cosmos3tao/results/<run>/ results/<run>/
+```
+
+```powershell
+python report\make_report.py --results results\<run> --out results\<run>\report.html
+```
+
+Loss / lr / grad-norm curves with crosshair tooltips, smoothing, log axis, table view, dark mode, run config and
+checkpoint events. See `report/sample_report.html` for an example built from a synthetic log.
+
 ## Local (Windows) tooling
 
 ```powershell
