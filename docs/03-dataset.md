@@ -98,6 +98,25 @@ The JSON report has keys `vials` (list of `{position, vial_id, planned, actual, 
 `deviating_positions`, `pass`. Mixing short factual questions with the full report gives the model an easy
 curriculum (perception first) and a strict target (the structured report the line controller would consume).
 
+## How the question/answer pairs are written
+
+No model and no person writes them. `make_samples` fills five fixed text templates with facts the program
+decided before drawing (planned content, actual content, fill %, status per vial):
+
+| # | Template (question) | Answer is computed as |
+| --- | --- | --- |
+| 1 | What is in the vial at position N? one word | that vial's actual content, e.g. `blue` |
+| 2 | How many vials are visible? integer | number of vials drawn |
+| 3 | Does vial N match the plan? yes/no | `yes` if its status is `OK`, else `no` |
+| 4 | List positions that do NOT match the plan, ascending, or `none` | positions with status ≠ `OK`, comma-joined |
+| 5 | Produce the inspection report as compact JSON … | the fact table serialised to JSON |
+
+Each human turn = `<image>` placeholder + the fixed inspector role text + (for questions 3–5 only) the plan
+line "Manufacturing plan: position 1 (VIAL 0007): colored cubes; …" + the question. Questions 1–2 omit the plan
+so the model must look rather than echo. The answer is the `gpt` turn and is copied to `normalized_answer`;
+`id` is an MD5 of image name + question. Fixed wording is what lets the web app rebuild the exact training
+prompt and lets the evaluator grade by exact match.
+
 ## File format (TAO `vlm` / `llava`)
 
 `annotations.json` is a JSON array; each element:
