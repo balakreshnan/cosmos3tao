@@ -39,6 +39,14 @@ real camera. Chapter 12 explains how to add real photos to the training set to c
 Because the dice are seeded (`--seed 42`), anyone who runs the program gets the identical 1,000 pictures, which is
 how the laptop could recreate the exact validation images the cluster tested on.
 
+**Was any AI model used to create the dataset? No.** The pictures are drawn by ordinary Python code with the
+Pillow image library: rectangles for the track, rounded rectangles for vials and liquid, squares for cubes,
+circles for wheels, text for labels, plus a little blur and noise. No image-generation model (Cosmos Predict,
+diffusion, GAN), no vision model and no language model was involved, and no human labelled anything. The
+answers are exact because the same code that chooses what to draw also writes the label. Models enter the
+project only later: Cosmos3-Nano is the model being trained, and its base version draws the bounding boxes in
+the web app.
+
 ## What the images show
 
 A side-view camera on a MagneMotion-style linear track, modeled on the one real plant photo in
