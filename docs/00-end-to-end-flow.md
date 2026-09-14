@@ -1,6 +1,6 @@
 # 00 · The whole journey, start to finish (plain language)
 
-![From one photo to a trained vision AI: the idea, the pipeline, results, what happens with the adapter, business benefits, key terms](images/whiteboard-one-photo-to-vision-ai.png)
+![From one photo to a trained vision AI: the idea, the pipeline, results, what happens with the adapter, business benefits, key terms](images/uwmcsicosmos3endtoend.png)
 
 *One photo + a drawing program + 24 minutes of training = a 45 MB expert you can run anywhere.* The whiteboard
 above is the whole project on one page: a data track (one real photo → a drawing program → 1,000 pictures with
