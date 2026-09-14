@@ -5,6 +5,7 @@ Read it in order the first time; afterwards jump to the chapter for the step you
 
 | # | Chapter | Answers |
 | --- | --- | --- |
+| 00 | [The whole journey, start to finish](00-end-to-end-flow.md) | **Start here if you are not technical**: the story from one photo to a working inspection app |
 | 01 | [Overview and architecture](01-overview.md) | What are the moving parts, how do they fit, what runs where |
 | 02 | [Cluster environment](02-cluster-environment.md) | SLURM, Pyxis/Enroot, Lustre, `.sqsh` images, GPU architecture constraints, env vars |
 | 03 | [The dataset](03-dataset.md) | How synthetic images and LLaVA annotations are generated, the five question types, ground truth |
@@ -17,6 +18,7 @@ Read it in order the first time; afterwards jump to the chapter for the step you
 | 10 | [Report](10-report.md) | `report/make_report.py`: parsing, analysis, the HTML page |
 | 11 | [Troubleshooting](11-troubleshooting.md) | Every failure hit during the first run, its cause and fix |
 | 12 | [Inference and next steps](12-inference-and-next-steps.md) | Using the adapter, real plant photos, second training round |
+| — | [Local inferencing guide](../inferencing/README.md) | Running the web app on a laptop GPU, with screenshots |
 | — | [Glossary](glossary.md) | TAO, cosmos-rl, LoRA, FSDP, Pyxis, sqsh, Omni, Qwen3-VL … |
 
 Conventions used throughout:

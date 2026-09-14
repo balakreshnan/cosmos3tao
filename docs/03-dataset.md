@@ -3,6 +3,42 @@
 Source: [`dataset/generate_tube_dataset.py`](../dataset/generate_tube_dataset.py). Produced by README step 4
 (inside `ptyche_setup.sh`) and regenerated locally for the report's failure gallery.
 
+## From one photo to thousands of examples (the non-technical version)
+
+We had **one** real photograph of the filling line. A model cannot learn a task from one example, and we could
+not go back to the plant and photograph thousands of deliberately mis-filled vials. So we did what a film studio
+does: we built a set.
+
+1. **We studied the photo** and wrote down what a scene contains: a metal track, wheeled carriers, tall clear
+   vials with printed labels, liquid that normally reaches about a third of the height, cube stacks, empties, a
+   glass shield in front, the camera looking from the side.
+2. **We wrote a drawing program** that paints such a scene from scratch. Every time it runs it rolls dice: how many
+   vials (5 to 8), what each one should contain according to the plan, and whether something went wrong with it
+   (wrong colour, too little, too much, empty, wrong kind of content). Then it paints exactly that.
+3. **Because the program decides the contents, it also knows the correct answer** for every picture: the plan,
+   what is really in each vial, how full it is, and which positions deviate. No human labelling was needed.
+4. **We ran it 1,000 times** and asked **5 questions** about every picture, giving 5,000 question/answer pairs.
+
+| From | To | How |
+| --- | --- | --- |
+| 1 real photo | a scene description | looked at it |
+| a scene description | a drawing program | ~400 lines of Python using an image library |
+| the drawing program | **800 training pictures** | run with seed 42, first 800 draws |
+| the drawing program | **200 validation pictures** | next 200 draws; used to check learning during training and for the accuracy test |
+| each picture | **5 question/answer pairs** | one per question type (what is in vial N, how many vials, does vial N match, which deviate, full JSON report) |
+| 800 pictures | **4,000 training pairs** | 800 × 5 |
+| 200 pictures | **1,000 validation pairs** | 200 × 5 |
+| the 1,000 validation pairs | **300 graded test questions** | first 60 of each question type, used for the accuracy table |
+| 1 real photo | **final exam** | never used in training; tried only at the very end in the web app |
+
+Important honesty note: the 1,000 pictures are **not** edited copies of the real photo. They are drawings in the
+same style. That is why the model's score on the drawings (96.7 %) is a measure of how well it learned the task,
+while its result on the real photo (7 of 8 vials right) is a first, separate indication of how it copes with a
+real camera. Chapter 12 explains how to add real photos to the training set to close that gap.
+
+Because the dice are seeded (`--seed 42`), anyone who runs the program gets the identical 1,000 pictures, which is
+how the laptop could recreate the exact validation images the cluster tested on.
+
 ## What the images show
 
 A side-view camera on a MagneMotion-style linear track, modeled on the one real plant photo in
