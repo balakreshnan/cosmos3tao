@@ -38,6 +38,9 @@ image. The model reports actual content, fill level, per-vial status (`OK`, `wro
 | `cluster/ptyche_eval.sbatch` + `cluster/eval_in_container.py` | **Cluster:** task accuracy of fine-tuned adapter vs zero-shot base on the val split |
 | `report/make_report.py` | Executive HTML training report from `train.log` (`report/run_lyris_gb200_3044273.html` is the real example) |
 | `inspect/inspect_tubes.py` | Inspection client + scorer (hosted Cosmos 3 reasoner or your fine-tuned endpoint) |
+| `inspect/local_infer.py` | Run base + LoRA adapter on a laptop GPU for one image |
+| `apps/inspection_app.py` | **Local web app**: upload a photo + plan → JSON report, per-vial table, annotated image with boxes (`apps/README.md`) |
+| `cluster/hf_upload.sh`, `hf/README.md` | Publish adapter (+ optional base) and model card to the Hugging Face Hub |
 | `setup.ps1`, `requirements.txt` | Windows: Python 3.14 venv for local tooling only |
 | `cluster/submit_tao_job.sh` | Alternative path through a TAO FTMS API deployment, if you have one |
 
