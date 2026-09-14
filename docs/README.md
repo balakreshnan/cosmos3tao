@@ -18,6 +18,7 @@ Read it in order the first time; afterwards jump to the chapter for the step you
 | 10 | [Report](10-report.md) | `report/make_report.py`: parsing, analysis, the HTML page |
 | 11 | [Troubleshooting](11-troubleshooting.md) | Every failure hit during the first run, its cause and fix |
 | 12 | [Inference and next steps](12-inference-and-next-steps.md) | Using the adapter, real plant photos, second training round |
+| 13 | [Model-based synthetic data](13-model-based-synthetic-data.md) | NVIDIA generators (AnomalyGen, Cosmos Transfer/Predict, Replicator) and a plan to make photoreal training data |
 | — | [Local inferencing guide](../inferencing/README.md) | Running the web app on a laptop GPU, with screenshots |
 | — | [Glossary](glossary.md) | TAO, cosmos-rl, LoRA, FSDP, Pyxis, sqsh, Omni, Qwen3-VL … |
 
