@@ -8,6 +8,10 @@ NVIDIA Cosmos 3 + TAO (Train Adapt Optimize): LoRA fine-tune **nvidia/Cosmos3-Na
 5 epochs, 625 optimizer steps, ~25 min wall time, best validation loss 0.0353 at epoch 5. Everything below is the
 exact sequence that worked.
 
+**New here?** The [`docs/`](docs/README.md) folder explains what each step below does internally: architecture,
+cluster concepts, dataset format, model conversion, every spec field, the training job, evaluation, the report,
+and a troubleshooting table.
+
 ## The inspection task
 
 Side-view camera on a MagneMotion-style linear track. Each wheeled carrier holds one labeled clear vial that
