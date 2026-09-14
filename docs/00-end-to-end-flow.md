@@ -1,5 +1,13 @@
 # 00 · The whole journey, start to finish (plain language)
 
+![From one photo to a trained vision AI: the idea, the pipeline, results, what happens with the adapter, business benefits, key terms](images/whiteboard-one-photo-to-vision-ai.png)
+
+*One photo + a drawing program + 24 minutes of training = a 45 MB expert you can run anywhere.* The whiteboard
+above is the whole project on one page: a data track (one real photo → a drawing program → 1,000 pictures with
+known answers), a model track (download Cosmos3-Nano → keep the part that reads images and text), 24 minutes of
+training on 4 GPUs, and a 45 MB adapter that goes into a report, a laptop, a web app, and a Hugging Face repo.
+Accuracy on 300 unseen questions rose from 51 % to 96.7 %. The sections below walk through each box in order.
+
 This chapter tells the story of the project in order, without assuming you know machine learning or clusters.
 Each step names the command from the main README that performs it and the chapter with the technical detail.
 
