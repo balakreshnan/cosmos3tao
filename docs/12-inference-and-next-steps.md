@@ -7,6 +7,73 @@
 - A merged model is never written to disk; the evaluator merges in memory. To produce one, run the merge code
   from `eval_in_container.py` and `model.save_pretrained(...)`.
 
+## Looking at the weights on the cluster
+
+```bash
+R=$LUSTRE_DIR/cosmos3tao/results/cosmos3_nano_tube_lora_3044273
+ls -la $R/output/best/                                  # symlinks 'safetensors' and 'checkpoint' -> best epoch
+readlink -f $R/output/best/safetensors                  # …/output/20260913221703/safetensors/epoch_5
+ls -lh $(readlink -f $R/output/best/safetensors)        # adapter_config.json + adapter *.safetensors
+du -sh $(readlink -f $R/output/best/safetensors) $LUSTRE_DIR/cosmos3tao/models/Cosmos3-Nano-qwen3vl
+cat $R/output/best/best_score.json
+```
+
+Inspect the tensors without loading a model (inside the container or the login venv after `pip install safetensors`):
+
+```bash
+python - <<'EOF'
+from safetensors import safe_open; import glob, os
+d = os.path.realpath(os.path.expandvars("$LUSTRE_DIR/cosmos3tao/results/cosmos3_nano_tube_lora_3044273/output/best/safetensors"))
+n = 0
+for f in sorted(glob.glob(d + "/*.safetensors")):
+    with safe_open(f, "pt") as sf:
+        keys = list(sf.keys()); n += len(keys)
+        for k in keys[:4]: print(k, tuple(sf.get_slice(k).get_shape()))
+print(n, "tensors")   # 288 = 144 LoRA modules x (A, B)
+EOF
+```
+
+## Downloading to the laptop
+
+Two things are needed: the converted base (~17 GB, 5 shards) and the adapter (~100 MB). Copy the adapter's real
+directory, not the symlink. PowerShell, from the repo:
+
+```powershell
+New-Item -ItemType Directory -Force models\adapter_epoch5 | Out-Null
+scp -r "<user>-mfa@login-lyris.nvidia.com:/lustre/fsw/general_sa/<user>/cosmos3tao/results/cosmos3_nano_tube_lora_3044273/output/20260913221703/safetensors/epoch_5/*" models\adapter_epoch5\
+scp -r "<user>-mfa@login-lyris.nvidia.com:/lustre/fsw/general_sa/<user>/cosmos3tao/models/Cosmos3-Nano-qwen3vl" models\
+```
+
+The 17 GB copy takes a while over VPN; `rsync -avP` from WSL resumes if interrupted. `models/` is git-ignored.
+
+## Local inference on a laptop GPU
+
+`inspect/local_infer.py` loads the base in bfloat16 (~16.5 GB on the GPU), merges the adapter in memory, and
+answers one question about one image. A 24 GB GPU is enough for a single image at the training resolution.
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install --index-url https://download.pytorch.org/whl/cu130 torch
+.\.venv\Scripts\python.exe -m pip install "transformers>=4.57" accelerate safetensors peft pillow
+```
+
+```powershell
+# synthetic validation image; plan looked up from ground_truth.json, answer compared to it
+.\.venv\Scripts\python.exe inspect\local_infer.py --image data\tube_inspection\val\images\vials_val_00004.png --ground-truth data\tube_inspection\val\ground_truth.json
+
+# the real plant photo
+.\.venv\Scripts\python.exe inspect\local_infer.py --image data\real\plant.jpg --plan "position 1 (VIAL 0174): colored cubes; position 2: colored cubes; position 3: empty; position 4 (VIAL 0019): orange liquid; position 5: blue liquid; position 6: yellow liquid; position 7 (VIAL 0042): blue liquid; position 8: orange liquid"
+
+# base model for comparison
+.\.venv\Scripts\python.exe inspect\local_infer.py --image data\real\plant.jpg --plan "..." --no-adapter
+
+# write a merged standalone checkpoint (17 GB) so future loads need no adapter
+.\.venv\Scripts\python.exe inspect\local_infer.py --merge-out models\Cosmos3-Nano-tube-merged
+```
+
+First load takes 1–2 minutes (reading 17 GB from disk); generation of a JSON report takes ~10–20 s on a laptop
+GPU. If you see CUDA out-of-memory, add `--device-map auto` (offloads layers to CPU RAM, slower) or lower
+`--max-pixels`.
+
 ## Using the model
 
 ### From Python inside the container (batch or ad-hoc)
