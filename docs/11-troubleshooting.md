@@ -24,6 +24,9 @@ that is now in the code. If you see one of these, the fix is already applied; pu
 | 17 | `git add -A` swept the 100 MB dataset into a commit | dataset regenerated locally inside the repo | `data/tube_inspection/` and `results/` are git-ignored |
 | 18 | `scp … Permission denied (publickey)` | cluster requires the MFA login name | `scp <user>-mfa@login-lyris.nvidia.com:…` |
 | 19 | PowerShell one-liner created folders named `scp`, `-r` | command pasted into `cmd.exe`, where `;` does not separate commands | run in PowerShell; one command per line |
+| 20 | `No space left on device` writing to `~` | 50 GB home quota filled by `~/.cache` (Enroot layers, Hugging Face, pip, cosmos-rl dataset cache) | `rm -rf ~/.cache/{huggingface,pip,enroot,cosmos}`; set `ENROOT_CACHE_PATH`, `ENROOT_DATA_PATH`, `HF_HOME`, `PIP_CACHE_DIR`, `XDG_CACHE_HOME` to Lustre in `~/.bashrc`; the training container now sets `XDG_CACHE_HOME` to Lustre |
+| 21 | `scp … <user>/…: No such file or directory` | `<user>` placeholder left in the Lustre path | Lustre path uses the plain username; only the SSH login has `-mfa` |
+| 22 | `readlink -f output/best/safetensors` empty on the login node | symlinks were created inside the container and point to `/tao-workspace/...` | use `output/<timestamp>/safetensors/epoch_N` directly |
 
 ## General debugging recipe
 

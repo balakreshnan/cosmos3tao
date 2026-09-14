@@ -52,6 +52,8 @@ python "$REPO/cluster/render_spec.py" \
 
 # ---- offline HF so compute nodes never reach the internet; caches on Lustre
 export HF_HOME="${HF_HOME:-$C_WORK/hf_cache}"
+# keep cosmos-rl's dataset cache (and any other ~/.cache writer) on Lustre, not in the 50 GB home quota
+export XDG_CACHE_HOME="${XDG_CACHE_HOME:-$C_WORK/.cache}"; mkdir -p "$XDG_CACHE_HOME"
 export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}" TRANSFORMERS_OFFLINE="${TRANSFORMERS_OFFLINE:-1}"
 export WANDB_MODE="${WANDB_MODE:-disabled}"
 export NUM_GPU_PER_NODE="$GPUS" WORLD_SIZE=1 NODE_RANK=0 MASTER_ADDR="${MASTER_ADDR:-127.0.0.1}" MASTER_PORT="${MASTER_PORT:-29500}"
