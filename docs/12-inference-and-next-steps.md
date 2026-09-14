@@ -11,11 +11,19 @@
 
 ```bash
 R=$LUSTRE_DIR/cosmos3tao/results/cosmos3_nano_tube_lora_3044273
-ls -la $R/output/best/                                  # symlinks 'safetensors' and 'checkpoint' -> best epoch
-readlink -f $R/output/best/safetensors                  # …/output/20260913221703/safetensors/epoch_5
-ls -lh $(readlink -f $R/output/best/safetensors)        # adapter_config.json + adapter *.safetensors
-du -sh $(readlink -f $R/output/best/safetensors) $LUSTRE_DIR/cosmos3tao/models/Cosmos3-Nano-qwen3vl
-cat $R/output/best/best_score.json
+cat $R/output/best/best_score.json                      # {"best_score": 0.0353, "best_ckpt_abs_dir": ".../epoch_5", ...}
+ls -la $R/output/best/                                  # symlinks 'safetensors' and 'checkpoints' -> best epoch
+```
+
+The symlinks were created inside the container, so they point at `/tao-workspace/...`, which does not exist
+on the login node (`readlink -f` returns nothing there; inside the container they work). Use the real path,
+replacing `/tao-workspace` with `$LUSTRE_DIR/cosmos3tao`:
+
+```bash
+A=$R/output/20260913221703/safetensors/epoch_5          # epoch from best_score.json, timestamp from ls $R/output
+ls -lh $A                                               # adapter_config.json + adapter *.safetensors
+du -sh $A $LUSTRE_DIR/cosmos3tao/models/Cosmos3-Nano-qwen3vl
+cat $A/adapter_config.json
 ```
 
 Inspect the tensors without loading a model (inside the container or the login venv after `pip install safetensors`):
